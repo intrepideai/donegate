@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { runBaselineHook, runStopHook } from '../src/hooks.js';
-import { BASIC_DONEFILE, cleanup, gitCommitAll, gitInit, tmpdir, write } from './helpers.js';
+import { BASIC_DONEFILE, cleanup, gitCommitAll, gitInit, rm, tmpdir, write } from './helpers.js';
 
 const FAILING_DONEFILE = `# DoD
 \`\`\`yaml
@@ -147,6 +147,82 @@ test('baseline hook records once with --if-missing', async () => {
     assert.match(first.stderr ?? '', /baseline recorded/);
     const second = await runBaselineHook({ ifMissing: true, quiet: false, cwd: root });
     assert.equal(second.stderr, null);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('deleting the donefile mid-session bounces instead of bypassing the gate', async () => {
+  const root = await setup(BASIC_DONEFILE);
+  try {
+    await runBaselineHook({ ifMissing: false, quiet: true, cwd: root });
+    rm(root, 'DONE.md');
+
+    for (const attempt of [1, 2, 3]) {
+      const outcome = await runStopHook('claude', payload(root));
+      assert.ok(outcome.stdout, 'expected a block');
+      const response = JSON.parse(outcome.stdout) as { decision: string; reason: string };
+      assert.equal(response.decision, 'block');
+      assert.match(response.reason, /DONE\.md was deleted mid-session/);
+      assert.match(response.reason, new RegExp(`attempt ${attempt}/3`));
+    }
+
+    // bounce budget spent → allow, loudly, with the way out spelled out
+    const final = await runStopHook('claude', payload(root));
+    assert.equal(final.stdout, null);
+    assert.match(final.stderr ?? '', /giving up/);
+    assert.equal(final.exitCode, 0);
+
+    // restoring the donefile brings the gate back to green and resets the session
+    write(root, 'DONE.md', BASIC_DONEFILE);
+    const restored = await runStopHook('claude', payload(root));
+    assert.equal(restored.stdout, null);
+    assert.match(restored.stderr ?? '', /✓ DONE/);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('breaking the donefile mid-session bounces instead of failing open', async () => {
+  const root = await setup(BASIC_DONEFILE);
+  try {
+    await runBaselineHook({ ifMissing: false, quiet: true, cwd: root });
+    write(root, 'DONE.md', '# the yaml block went missing\n');
+
+    const outcome = await runStopHook('claude', payload(root));
+    assert.ok(outcome.stdout, 'expected a block');
+    const response = JSON.parse(outcome.stdout) as { decision: string; reason: string };
+    assert.equal(response.decision, 'block');
+    assert.match(response.reason, /modified mid-session and no longer parses/);
+
+    // repairing the donefile brings the gate back to green
+    write(root, 'DONE.md', BASIC_DONEFILE);
+    const repaired = await runStopHook('claude', payload(root));
+    assert.equal(repaired.stdout, null);
+    assert.match(repaired.stderr ?? '', /✓ DONE/);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('cursor: aborted turns are not gated even when the donefile is gone', async () => {
+  const root = await setup(BASIC_DONEFILE);
+  try {
+    await runBaselineHook({ ifMissing: false, quiet: true, cwd: root });
+    rm(root, 'DONE.md');
+
+    const aborted = await runStopHook(
+      'cursor',
+      JSON.stringify({ conversation_id: 'c', workspace_roots: [root], status: 'aborted' }),
+    );
+    assert.equal(aborted.stdout, null);
+
+    const completed = await runStopHook(
+      'cursor',
+      JSON.stringify({ conversation_id: 'c', workspace_roots: [root], status: 'completed' }),
+    );
+    const response = JSON.parse(completed.stdout!) as { followup_message: string };
+    assert.match(response.followup_message, /deleted mid-session/);
   } finally {
     cleanup(root);
   }
