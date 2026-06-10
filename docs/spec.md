@@ -42,6 +42,9 @@ guards:               # optional — tamper detection levels
   no_debug_artifacts: warn   # console.log/debugger/pdb.set_trace left behind
   test_globs:                # optional — what counts as a test file
     ["**/*.test.*", "**/*.spec.*", "**/test_*.py", "**/*_test.go", "..."]
+  exclude: []                # optional — files exempt from guard analysis
+                             # (for code that legitimately CONTAINS the
+                             # patterns: lint configs, scanners, donegate itself)
 
 gate:                 # optional
   max_bounces: 3      # stop-hook re-prompts per session before giving up (1-20)

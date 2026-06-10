@@ -176,6 +176,29 @@ test('disabled guards are skipped', async () => {
   }
 });
 
+test('guards.exclude exempts files that legitimately contain patterns', async () => {
+  const root = await setupRepo();
+  try {
+    write(
+      root,
+      'DONE.md',
+      BASIC_DONEFILE.replace('version: 1', 'version: 1\nguards:\n  exclude: ["src/patterns.ts", "test/app.test.ts"]'),
+    );
+    gitCommitAll(root, 'configure');
+    const config = loadConfig(root);
+    await writeBaseline(config);
+    // a "patterns" file full of suppression strings, and a skip in the excluded test
+    write(root, 'src/patterns.ts', "export const RULES = ['eslint-disable', '@ts-ignore'];\n");
+    write(root, 'test/app.test.ts', TEST_FILE.replace("test('two'", "test.skip('two'"));
+    const results = await runGuards(config, await resolveComparison(config));
+    assert.equal(guard(results, 'no_disabled_lint').status, 'pass');
+    assert.equal(guard(results, 'no_new_skips').status, 'pass');
+    assert.equal(guard(results, 'no_deleted_tests').status, 'pass');
+  } finally {
+    cleanup(root);
+  }
+});
+
 test('untracked new test file with skips is caught', async () => {
   const root = await setupRepo();
   try {

@@ -37,6 +37,7 @@ const DEFAULT_GUARDS: GuardsConfig = {
   no_new_todos: 'warn',
   no_debug_artifacts: 'warn',
   test_globs: DEFAULT_TEST_GLOBS,
+  exclude: [],
 };
 
 const DEFAULT_GATE: GateConfig = { max_bounces: 3 };
@@ -152,7 +153,7 @@ export function parseDonefileSource(source: string, sourcePath: string, root: st
     checks.push({ name, run, timeout });
   }
 
-  const guards: GuardsConfig = { ...DEFAULT_GUARDS, test_globs: [...DEFAULT_TEST_GLOBS] };
+  const guards: GuardsConfig = { ...DEFAULT_GUARDS, test_globs: [...DEFAULT_TEST_GLOBS], exclude: [] };
   if (data.guards !== undefined) {
     if (!isRecord(data.guards)) throw new DonefileError('"guards" must be a map');
     for (const [key, value] of Object.entries(data.guards)) {
@@ -166,10 +167,11 @@ export function parseDonefileSource(source: string, sourcePath: string, root: st
           guards[key] = asGuardLevel(value, key);
           break;
         case 'test_globs':
+        case 'exclude':
           if (!Array.isArray(value) || value.some((v) => typeof v !== 'string')) {
-            throw new DonefileError('guards.test_globs must be a list of glob strings');
+            throw new DonefileError(`guards.${key} must be a list of glob strings`);
           }
-          guards.test_globs = value as string[];
+          guards[key] = value as string[];
           break;
         default:
           throw new DonefileError(`unknown guard "${key}"`);

@@ -23,6 +23,11 @@ export interface GuardsConfig {
   no_debug_artifacts: GuardLevel;
   /** Glob patterns that identify test files. */
   test_globs: string[];
+  /**
+   * Files exempt from guard analysis — for code that legitimately *contains*
+   * skip/suppression patterns (lint configs, pattern scanners, donegate itself).
+   */
+  exclude: string[];
 }
 
 export interface GateConfig {

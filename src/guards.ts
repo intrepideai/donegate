@@ -191,6 +191,8 @@ export async function runGuards(config: DoneConfig, comparison: ComparisonContex
   const isTestFile = makeTestFileMatcher(config.guards.test_globs);
   const donefileRel = path.relative(config.root, config.sourcePath).split(path.sep).join('/');
   const isMetaFile = makeMetaFileMatcher(donefileRel);
+  const isExcluded =
+    config.guards.exclude.length > 0 ? makeTestFileMatcher(config.guards.exclude) : () => false;
   const results: GuardResult[] = [];
   const baseline = comparison.baseline;
 
@@ -198,13 +200,14 @@ export async function runGuards(config: DoneConfig, comparison: ComparisonContex
   {
     const findings: GuardFinding[] = [];
     const rel = donefileRel;
+    const blessHint = 'if this edit is the human\'s, bless it with `donegate baseline`';
     if (baseline) {
       try {
         const current = sha256(fs.readFileSync(config.sourcePath));
         if (current !== baseline.donefile_sha) {
           findings.push({
             file: rel,
-            detail: `${rel} was modified after the baseline was taken — the definition of done is not the agent's to edit`,
+            detail: `${rel} was modified after the baseline was taken — the definition of done is not the agent's to edit (${blessHint})`,
           });
         }
       } catch {
@@ -215,7 +218,7 @@ export async function runGuards(config: DoneConfig, comparison: ComparisonContex
       // only flag modifications and deletions when we have no session baseline.
       findings.push({
         file: rel,
-        detail: `${rel} changed in this diff — the definition of done is not the agent's to edit`,
+        detail: `${rel} changed in this diff — the definition of done is not the agent's to edit (${blessHint})`,
       });
     }
     results.push(makeResult('no_done_edits', config.guards.no_done_edits, findings));
@@ -224,12 +227,13 @@ export async function runGuards(config: DoneConfig, comparison: ComparisonContex
   // ── no_deleted_tests ───────────────────────────────────────────────────────
   {
     const findings: GuardFinding[] = [];
-    const deletedTestFiles = inputs.deletedPaths.filter(isTestFile);
+    const deletedTestFiles = inputs.deletedPaths.filter((f) => isTestFile(f) && !isExcluded(f));
     for (const file of deletedTestFiles) {
       findings.push({ file, detail: 'test file deleted' });
     }
     if (baseline) {
       for (const [file, entry] of Object.entries(baseline.test_files)) {
+        if (isExcluded(file)) continue;
         // Follow renames: a moved test file is compared at its new home.
         const currentPath = fs.existsSync(path.join(config.root, file))
           ? file
@@ -262,7 +266,7 @@ export async function runGuards(config: DoneConfig, comparison: ComparisonContex
   {
     const findings: GuardFinding[] = [];
     for (const [file, lines] of inputs.added) {
-      if (!isTestFile(file)) continue;
+      if (!isTestFile(file) || isExcluded(file)) continue;
       for (const { line, text } of lines) {
         for (const { re, what } of SKIP_PATTERNS) {
           if (re.test(text)) {
@@ -274,6 +278,7 @@ export async function runGuards(config: DoneConfig, comparison: ComparisonContex
     }
     if (baseline) {
       for (const [file, entry] of Object.entries(baseline.test_files)) {
+        if (isExcluded(file)) continue;
         const currentPath = fs.existsSync(path.join(config.root, file))
           ? file
           : inputs.renames.get(file);
@@ -298,7 +303,7 @@ export async function runGuards(config: DoneConfig, comparison: ComparisonContex
   {
     const findings: GuardFinding[] = [];
     for (const [file, lines] of inputs.added) {
-      if (isMetaFile(file)) continue;
+      if (isMetaFile(file) || isExcluded(file)) continue;
       for (const { line, text } of lines) {
         for (const { re, what } of LINT_DISABLE_PATTERNS) {
           if (re.test(text)) {
@@ -315,7 +320,7 @@ export async function runGuards(config: DoneConfig, comparison: ComparisonContex
   {
     const findings: GuardFinding[] = [];
     for (const [file, lines] of inputs.added) {
-      if (isMetaFile(file)) continue;
+      if (isMetaFile(file) || isExcluded(file)) continue;
       for (const { line, text } of lines) {
         if (TODO_PATTERN.test(text)) {
           findings.push({ file, line, snippet: snippet(text), detail: 'TODO/FIXME introduced' });
@@ -329,7 +334,7 @@ export async function runGuards(config: DoneConfig, comparison: ComparisonContex
   {
     const findings: GuardFinding[] = [];
     for (const [file, lines] of inputs.added) {
-      if (isTestFile(file) || isMetaFile(file)) continue;
+      if (isTestFile(file) || isMetaFile(file) || isExcluded(file)) continue;
       for (const { line, text } of lines) {
         for (const { re, what } of DEBUG_PATTERNS) {
           if (re.test(text)) {

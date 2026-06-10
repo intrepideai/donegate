@@ -169,6 +169,11 @@ Everything is **deterministic** — diffs and regexes against your git history
 and the session baseline. Same tree, same verdict, on any machine. No LLM
 judges anything.
 
+Two escape hatches, both human-controlled: files that legitimately *contain*
+these patterns (lint configs, pattern scanners) go in `guards.exclude`, and a
+deliberate DONE.md edit is blessed with `donegate baseline`. Renames are
+followed, so moving a test file is never "deleting" it.
+
 ## Works with
 
 | | command | mechanism |

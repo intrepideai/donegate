@@ -16,6 +16,16 @@ checks:
     run: npm test
     timeout: 600
 
+guards:
+  # These files legitimately CONTAIN skip/suppression patterns (they're the
+  # pattern definitions and their tests), so they're exempt from line scanning.
+  exclude:
+    - src/guards.ts
+    - src/baseline.ts
+    - test/guards.test.ts
+    - test/receipt.test.ts
+    - test/install.test.ts
+
 gate:
   max_bounces: 3
 ```
