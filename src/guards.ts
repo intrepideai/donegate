@@ -37,6 +37,10 @@ const SKIP_PATTERNS: Array<{ re: RegExp; what: string }> = [
   { re: /#\[ignore\b/, what: 'Rust #[ignore] attribute' },
   { re: /@(?:Disabled|Ignore)\b/, what: 'JUnit disabled annotation' },
   { re: /^\s*x(?:it|describe|specify)\s+['"]/, what: 'RSpec disabled example' },
+  { re: /@(?:module)?tag\s+:skip\b/, what: 'ExUnit skip tag' },
+  { re: /\[\s*(?:Fact|Theory)\s*\(\s*Skip\s*=/, what: 'xUnit Skip attribute' },
+  { re: /markTestSkipped|markTestIncomplete/, what: 'PHPUnit test skipped' },
+  { re: /XCTSkip(?:If|Unless)?\(/, what: 'XCTest skip' },
 ];
 
 const LINT_DISABLE_PATTERNS: Array<{ re: RegExp; what: string }> = [
@@ -50,6 +54,12 @@ const LINT_DISABLE_PATTERNS: Array<{ re: RegExp; what: string }> = [
   { re: /#!?\[allow\(/, what: 'Rust #[allow(...)]' },
   { re: /@SuppressWarnings\b/, what: '@SuppressWarnings' },
   { re: /rubocop:disable/, what: 'rubocop:disable' },
+  { re: /#pragma warning disable/, what: '#pragma warning disable' },
+  { re: /phpcs:ignore|@codingStandardsIgnore/, what: 'phpcs suppression' },
+  { re: /phpstan-ignore/, what: 'phpstan suppression' },
+  { re: /credo:disable/, what: 'credo:disable' },
+  { re: /swiftlint:disable/, what: 'swiftlint:disable' },
+  { re: /deno-lint-ignore/, what: 'deno-lint-ignore' },
 ];
 
 const TODO_PATTERN = /\b(?:TODO|FIXME|HACK|XXX)\b/;
@@ -122,20 +132,26 @@ interface GuardInputs {
   deletedPaths: string[];
   /** Tracked files that were modified (not added) since the comparison point. */
   modifiedPaths: string[];
+  /** oldPath → newPath for renames, so "moved" is never reported as "deleted". */
+  renames: Map<string, string>;
 }
 
 async function collectInputs(config: DoneConfig, comparison: ComparisonContext): Promise<GuardInputs> {
   let added = new Map<string, AddedLine[]>();
   let deletedPaths: string[] = [];
   let modifiedPaths: string[] = [];
+  const renames = new Map<string, string>();
 
   if (comparison.ref) {
     added = await addedLines(comparison.ref, config.root);
     const changed = await changedFiles(comparison.ref, config.root);
     deletedPaths = changed.filter((c) => c.status === 'D').map((c) => c.path);
     modifiedPaths = changed.filter((c) => c.status === 'M' || c.status === 'R').map((c) => c.path);
+    for (const c of changed) {
+      if (c.status === 'R' && c.oldPath) renames.set(c.oldPath, c.path);
+    }
   }
-  return { config, comparison, added, deletedPaths, modifiedPaths };
+  return { config, comparison, added, deletedPaths, modifiedPaths, renames };
 }
 
 /** Files guards never line-scan: the donefile itself, donegate state, and prose/config formats. */
@@ -214,8 +230,11 @@ export async function runGuards(config: DoneConfig, comparison: ComparisonContex
     }
     if (baseline) {
       for (const [file, entry] of Object.entries(baseline.test_files)) {
-        const full = path.join(config.root, file);
-        if (!fs.existsSync(full)) {
+        // Follow renames: a moved test file is compared at its new home.
+        const currentPath = fs.existsSync(path.join(config.root, file))
+          ? file
+          : inputs.renames.get(file);
+        if (!currentPath) {
           if (!deletedTestFiles.includes(file)) {
             findings.push({ file, detail: 'test file deleted since the baseline was taken' });
           }
@@ -223,10 +242,10 @@ export async function runGuards(config: DoneConfig, comparison: ComparisonContex
         }
         if (entry.tests > 0) {
           try {
-            const counts = countTests(file, fs.readFileSync(full, 'utf8'));
+            const counts = countTests(currentPath, fs.readFileSync(path.join(config.root, currentPath), 'utf8'));
             if (counts.tests < entry.tests) {
               findings.push({
-                file,
+                file: currentPath,
                 detail: `test count dropped from ${entry.tests} to ${counts.tests} since the baseline`,
               });
             }
@@ -255,13 +274,15 @@ export async function runGuards(config: DoneConfig, comparison: ComparisonContex
     }
     if (baseline) {
       for (const [file, entry] of Object.entries(baseline.test_files)) {
-        const full = path.join(config.root, file);
-        if (!fs.existsSync(full)) continue;
+        const currentPath = fs.existsSync(path.join(config.root, file))
+          ? file
+          : inputs.renames.get(file);
+        if (!currentPath) continue;
         try {
-          const counts = countTests(file, fs.readFileSync(full, 'utf8'));
-          if (counts.skips > entry.skips && !findings.some((f) => f.file === file)) {
+          const counts = countTests(currentPath, fs.readFileSync(path.join(config.root, currentPath), 'utf8'));
+          if (counts.skips > entry.skips && !findings.some((f) => f.file === currentPath)) {
             findings.push({
-              file,
+              file: currentPath,
               detail: `skipped-test count rose from ${entry.skips} to ${counts.skips} since the baseline`,
             });
           }

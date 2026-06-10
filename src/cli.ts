@@ -24,6 +24,7 @@ import {
   renderTerminal,
   renderVerdict,
 } from './receipt.js';
+import { renderStatus } from './status.js';
 import { bold, cyan, dim, green, red, yellow } from './ui.js';
 import { VERSION } from './version.js';
 
@@ -38,6 +39,7 @@ ${bold('COMMANDS')}
   ${cyan('check')}                     run the gate: every check + tamper guards
   ${cyan('install')} [target]          gate an agent: claude | codex | cursor | ci | all
   ${cyan('uninstall')} <target>        remove donegate hooks for a target
+  ${cyan('status')}                    show donefile, baseline, hooks, and last receipt
   ${cyan('run')} -- <command…>         gate any command: baseline → run it → check
   ${cyan('baseline')}                  snapshot tests + DONE.md for tamper detection
   ${cyan('receipt')}                   show the latest receipt (--md | --json)
@@ -47,6 +49,7 @@ ${bold('OPTIONS')}
   check:     --only <names>   run a subset (comma-separated)
              --no-guards      skip tamper guards
              --json           print the receipt as JSON
+             --quiet          verdict only
   install:   --global         install to ~/.claude, ~/.codex, or ~/.cursor
   baseline:  --if-missing     only record when no baseline exists
   all:       -h, --help, -V, --version
@@ -274,7 +277,9 @@ async function cmdReceipt(argv: string[]): Promise<number> {
   } else {
     process.stdout.write(renderTerminal(receipt) + '\n');
   }
-  return receipt.verdict === 'pass' ? 0 : 1;
+  // Printing a receipt is a success even when the verdict it reports is red —
+  // `check` is the command whose exit code carries the verdict.
+  return 0;
 }
 
 async function cmdHook(argv: string[]): Promise<number> {
@@ -344,6 +349,12 @@ async function main(): Promise<void> {
       case 'receipt':
         code = await cmdReceipt(rest);
         break;
+      case 'status': {
+        const status = renderStatus(process.cwd());
+        process.stdout.write(status.text + '\n');
+        code = status.exitCode;
+        break;
+      }
       case 'hook':
         code = await cmdHook(rest);
         break;

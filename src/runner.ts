@@ -4,18 +4,10 @@ import { stripAnsi } from './ui.js';
 
 const TAIL_BYTES = 16 * 1024;
 
-function shellFor(command: string): { cmd: string; args: string[] } {
-  if (process.platform === 'win32') {
-    return { cmd: process.env.ComSpec ?? 'cmd.exe', args: ['/d', '/s', '/c', command] };
-  }
-  return { cmd: '/bin/sh', args: ['-c', command] };
-}
-
 /** Run one check command, capturing combined output (tail-capped). */
 export function runCheck(check: CheckDef, cwd: string): Promise<CheckResult> {
   return new Promise((resolve) => {
     const started = Date.now();
-    const { cmd, args } = shellFor(check.run);
 
     let tail = Buffer.alloc(0);
     const append = (chunk: Buffer) => {
@@ -26,19 +18,30 @@ export function runCheck(check: CheckDef, cwd: string): Promise<CheckResult> {
     let timedOut = false;
     let settled = false;
 
-    const child = spawn(cmd, args, {
+    // `shell: true` gets the platform's own quoting rules right (sh -c on
+    // POSIX, cmd.exe on Windows) — hand-rolling cmd.exe argument quoting is a
+    // known footgun. `detached` puts POSIX children in their own process group
+    // so timeouts can kill the whole tree.
+    const child = spawn(check.run, {
       cwd,
+      shell: true,
       env: { ...process.env, DONEGATE: '1' },
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: process.platform !== 'win32',
     });
 
-    child.stdout.on('data', append);
-    child.stderr.on('data', append);
+    child.stdout?.on('data', append);
+    child.stderr?.on('data', append);
 
     const killTree = (signal: NodeJS.Signals) => {
       try {
-        if (process.platform !== 'win32' && child.pid) {
+        if (process.platform === 'win32') {
+          if (child.pid) {
+            spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+          } else {
+            child.kill(signal);
+          }
+        } else if (child.pid) {
           process.kill(-child.pid, signal);
         } else {
           child.kill(signal);

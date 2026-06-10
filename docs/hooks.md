@@ -13,6 +13,12 @@ and every teammate's agent is gated too. Add `--global` to install at the user
 level (`~/.claude`, `~/.codex`, `~/.cursor`) instead; global hooks are silent
 no-ops in repos without a DONE.md.
 
+Installed hooks carry an explicit `timeout` (stop: **1800s**, baseline:
+**120s**). This matters: agents kill hooks after a short default (Claude Code:
+60 seconds), which would silently un-gate any repo whose test suite takes
+longer than a minute. Per-check `timeout:` values in DONE.md are the real
+budget — keep their sum under the stop timeout.
+
 ## Claude Code
 
 `donegate install claude` → `.claude/settings.json`:

@@ -44,7 +44,15 @@ npx donegate install    # gates every coding agent you use, project-wide
 That's the whole setup. From now on, when Claude Code / Codex / Cursor tries to
 say *"done"*, donegate runs your checks first. Commit `DONE.md` and
 `.claude/settings.json` (etc.) and **everyone on the team gets the same gate
-for free.**
+for free.** (`donegate status` shows the whole posture at a glance — donefile,
+baseline, hooks, last receipt.)
+
+Want to see it catch a cheat before touching your own repo? Run the sandboxed
+demo:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/intrepideai/donegate/main/examples/demo.sh | bash
+```
 
 ## What that looks like
 
@@ -172,9 +180,11 @@ judges anything.
 | **anything else** | `donegate run -- <cmd>` | baseline → run your agent → gate |
 
 Hooks are installed **project-level by default** (commit them — the whole team
-is gated) or `--global` for every repo you touch. Repos without a DONE.md are
-silently ignored, an agent can never be trapped (see *bounce protection* in
-[docs/hooks.md](docs/hooks.md)), and ctrl-c always means ctrl-c.
+is gated) or `--global` for every repo you touch, and they carry explicit
+generous timeouts so a long test suite is never cut off by an agent's 60-second
+hook default. Repos without a DONE.md are silently ignored, an agent can never
+be trapped (see *bounce protection* in [docs/hooks.md](docs/hooks.md)), and
+ctrl-c always means ctrl-c.
 
 ## Receipts, not vibes
 

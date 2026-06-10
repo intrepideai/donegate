@@ -87,6 +87,62 @@ test('refuses to modify corrupt settings', () => {
   }
 });
 
+test('uninstall with nothing installed reports nothing removed', () => {
+  const root = tmpdir();
+  try {
+    write(
+      root,
+      '.claude/settings.json',
+      JSON.stringify({
+        hooks: { Stop: [{ hooks: [{ type: 'command', command: 'their-hook.sh' }] }] },
+      }),
+    );
+    assert.equal(uninstallAgent('claude', root), null);
+    // their config untouched
+    const config = JSON.parse(read(root, '.claude/settings.json'));
+    assert.equal(config.hooks.Stop[0].hooks[0].command, 'their-hook.sh');
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('a user hook merely mentioning "donegate" is never treated as ours', () => {
+  const root = tmpdir();
+  try {
+    write(
+      root,
+      '.claude/settings.json',
+      JSON.stringify({
+        hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo donegate-is-cool' }] }] },
+      }),
+    );
+    // install still adds ours (the user hook doesn't count as installed)
+    assert.equal(installAgent('claude', root).action, 'installed');
+    // uninstall removes only ours
+    uninstallAgent('claude', root);
+    const config = JSON.parse(read(root, '.claude/settings.json'));
+    assert.equal(config.hooks.Stop.length, 1);
+    assert.equal(config.hooks.Stop[0].hooks[0].command, 'echo donegate-is-cool');
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('installed hooks carry explicit timeouts (agents default to ~60s)', () => {
+  const root = tmpdir();
+  try {
+    installAgent('claude', root);
+    const claude = JSON.parse(read(root, '.claude/settings.json'));
+    assert.equal(claude.hooks.Stop[0].hooks[0].timeout, 1800);
+    assert.equal(claude.hooks.SessionStart[0].hooks[0].timeout, 120);
+    installAgent('cursor', root);
+    const cursor = JSON.parse(read(root, '.cursor/hooks.json'));
+    assert.equal(cursor.hooks.stop[0].timeout, 1800);
+  } finally {
+    cleanup(root);
+  }
+});
+
 test('ci workflow install/uninstall respects ownership marker', () => {
   const root = tmpdir();
   try {

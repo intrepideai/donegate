@@ -1,0 +1,36 @@
+name: Bug report
+description: Something donegate did wrong — false positive, missed cheat, broken hook
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Include the command you ran and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: receipt
+    attributes:
+      label: Receipt / output
+      description: Paste `donegate check` output or `.donegate/receipts/latest.json` (redact anything private).
+      render: shell
+  - type: textarea
+    id: donefile
+    attributes:
+      label: Your DONE.md yaml block
+      render: yaml
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      placeholder: donegate 0.1.0 · node 22.14 · macOS 15 · Claude Code 2.x
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where did it happen?
+      options: [CLI (donegate check), Claude Code hook, Codex hook, Cursor hook, CI, donegate run]
+    validations:
+      required: true

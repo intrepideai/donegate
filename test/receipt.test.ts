@@ -98,6 +98,46 @@ test('e2e: the built CLI runs init → check in a real repo', () => {
   }
 });
 
+test('e2e: receipt exits 0 even when the verdict it reports is red', () => {
+  const root = tmpdir();
+  try {
+    gitInit(root);
+    write(
+      root,
+      'DONE.md',
+      '# d\n```yaml\nchecks:\n  - name: bad\n    run: node -e "process.exit(1)"\n```\n',
+    );
+    gitCommitAll(root);
+    try {
+      execFileSync('node', [CLI, 'check'], { cwd: root, stdio: 'pipe' });
+      assert.fail('check should exit 1');
+    } catch (err) {
+      assert.equal((err as { status?: number }).status, 1);
+    }
+    // receipt printing succeeds (execFileSync throws on non-zero exit)
+    const md = execFileSync('node', [CLI, 'receipt', '--md'], { cwd: root, encoding: 'utf8' });
+    assert.match(md, /NOT DONE/);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('e2e: status renders donefile, hooks, and receipt lines', () => {
+  const root = tmpdir();
+  try {
+    gitInit(root);
+    write(root, 'DONE.md', BASIC_DONEFILE);
+    gitCommitAll(root);
+    execFileSync('node', [CLI, 'check'], { cwd: root, stdio: 'pipe' });
+    const out = execFileSync('node', [CLI, 'status'], { cwd: root, encoding: 'utf8', env: { ...process.env, HOME: root } });
+    assert.match(out, /donefile/);
+    assert.match(out, /baseline/);
+    assert.match(out, /receipt\s+✓ DONE/);
+  } finally {
+    cleanup(root);
+  }
+});
+
 test('e2e: hook protocol over real stdin', () => {
   const root = tmpdir();
   try {

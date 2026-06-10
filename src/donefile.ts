@@ -17,10 +17,15 @@ export const DEFAULT_TEST_GLOBS = [
   '**/*_test.py',
   '**/*_test.go',
   '**/*_test.rb',
+  '**/*_test.exs',
   '**/*Test.java',
   '**/*Test.kt',
+  '**/*Test.php',
+  '**/*Tests.cs',
+  '**/*Tests.swift',
   '**/tests/**',
   '**/__tests__/**',
+  'test/**',
   'spec/**',
 ];
 

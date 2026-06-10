@@ -1,4 +1,6 @@
-/** Tiny ANSI helper. Colors only when stderr/stdout is a TTY and NO_COLOR is unset. */
+/** Tiny ANSI helper. Colors only when stdout is a TTY and NO_COLOR is unset. */
+
+const ESC = '\x1b';
 
 const enabled =
   process.env.NO_COLOR === undefined &&
@@ -6,7 +8,7 @@ const enabled =
   (process.stdout.isTTY === true || process.env.FORCE_COLOR !== undefined);
 
 function wrap(open: number, close: number): (s: string) => string {
-  return (s: string) => (enabled ? `[${open}m${s}[${close}m` : s);
+  return (s: string) => (enabled ? `${ESC}[${open}m${s}${ESC}[${close}m` : s);
 }
 
 export const bold = wrap(1, 22);
@@ -52,8 +54,7 @@ export function ms(durationMs: number): string {
 
 /** Strip ANSI escapes (for embedding tool output into receipts / hook reasons). */
 export function stripAnsi(s: string): string {
-  // eslint-disable-next-line no-control-regex
-  return s.replace(/\[[0-9;]*[A-Za-z]/g, '');
+  return s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '');
 }
 
 export function indent(text: string, prefix = '  '): string {

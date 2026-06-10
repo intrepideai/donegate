@@ -189,6 +189,64 @@ test('untracked new test file with skips is caught', async () => {
   }
 });
 
+test('renaming a test file is not "deleting" it', async () => {
+  const root = await setupRepo();
+  try {
+    const config = loadConfig(root);
+    await writeBaseline(config);
+    // git mv equivalent: move the file, keep contents identical
+    const content = read(root, 'test/app.test.ts');
+    rm(root, 'test/app.test.ts');
+    write(root, 'test/app.renamed.test.ts', content);
+    const { execFileSync } = await import('node:child_process');
+    execFileSync('git', ['add', '-A'], { cwd: root, stdio: 'pipe' });
+    const results = await runGuards(config, await resolveComparison(config));
+    assert.equal(
+      guard(results, 'no_deleted_tests').status,
+      'pass',
+      JSON.stringify(guard(results, 'no_deleted_tests').findings),
+    );
+    assert.equal(guard(results, 'no_new_skips').status, 'pass');
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('renamed test file with a dropped test is still caught at its new path', async () => {
+  const root = await setupRepo();
+  try {
+    const config = loadConfig(root);
+    await writeBaseline(config);
+    const content = read(root, 'test/app.test.ts');
+    rm(root, 'test/app.test.ts');
+    // moved AND lost a test
+    write(root, 'test/app.renamed.test.ts', content.replace("test('two', () => {});\n", ''));
+    const { execFileSync } = await import('node:child_process');
+    execFileSync('git', ['add', '-A'], { cwd: root, stdio: 'pipe' });
+    const results = await runGuards(config, await resolveComparison(config));
+    const g = guard(results, 'no_deleted_tests');
+    assert.equal(g.status, 'fail');
+    assert.match(g.findings[0]!.detail, /dropped from 2 to 1/);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('non-ASCII test filenames survive the diff pipeline', async () => {
+  const root = await setupRepo();
+  try {
+    const config = loadConfig(root);
+    await writeBaseline(config);
+    write(root, 'test/tëst-ünïcode.test.ts', "import { test } from 'node:test';\ntest.skip('lazy', () => {});\n");
+    const results = await runGuards(config, await resolveComparison(config));
+    const g = guard(results, 'no_new_skips');
+    assert.equal(g.status, 'fail');
+    assert.ok(g.findings.some((f) => f.file.includes('ünïcode')));
+  } finally {
+    cleanup(root);
+  }
+});
+
 test('outside git without baseline: guards skip with a note', async () => {
   const root = tmpdir();
   try {

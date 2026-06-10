@@ -12,12 +12,22 @@ export function git(args: string[], cwd: string): Promise<GitResult> {
   return new Promise((resolve) => {
     execFile(
       'git',
-      args,
+      // quotepath=off keeps non-ASCII paths literal instead of octal-escaped.
+      ['-c', 'core.quotepath=off', ...args],
       { cwd, maxBuffer: 32 * 1024 * 1024, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } },
       (error, stdout, stderr) => {
         resolve({ ok: !error, stdout: stdout ?? '', stderr: stderr ?? '' });
       },
     );
+  });
+}
+
+/** Unquote a git-quoted path (`"a\"b c.ts"`) if quoted. */
+function unquoteGitPath(p: string): string {
+  if (!p.startsWith('"') || !p.endsWith('"') || p.length < 2) return p;
+  return p.slice(1, -1).replace(/\\(.)/g, (_, ch: string) => {
+    const map: Record<string, string> = { n: '\n', t: '\t', '"': '"', '\\': '\\' };
+    return map[ch] ?? ch;
   });
 }
 
@@ -75,16 +85,34 @@ export interface ChangedFile {
   /** A=added, M=modified, D=deleted, R=renamed, ?=untracked */
   status: string;
   path: string;
+  /** For renames: where the file used to live. */
+  oldPath?: string;
 }
 
-/** Files changed between `base` and the working tree, including untracked files. */
+/**
+ * Files changed between `base` and the working tree, including untracked files.
+ * Renames are detected (status `R`) so guards can tell "moved" from "deleted".
+ */
 export async function changedFiles(base: string, cwd: string): Promise<ChangedFile[]> {
   const out: ChangedFile[] = [];
-  const diff = await git(['diff', '--name-status', '--no-renames', '-z', base, '--'], cwd);
+  const diff = await git(['diff', '--name-status', '--find-renames', '-z', base, '--'], cwd);
   if (diff.ok) {
     const parts = diff.stdout.split('\0').filter((p) => p.length > 0);
-    for (let i = 0; i + 1 < parts.length; i += 2) {
-      out.push({ status: parts[i]![0] ?? 'M', path: parts[i + 1]! });
+    let i = 0;
+    while (i < parts.length) {
+      const status = parts[i]![0] ?? 'M';
+      if (status === 'R' || status === 'C') {
+        const oldPath = parts[i + 1];
+        const newPath = parts[i + 2];
+        if (oldPath !== undefined && newPath !== undefined) {
+          out.push({ status: 'R', path: newPath, oldPath });
+        }
+        i += 3;
+      } else {
+        const p = parts[i + 1];
+        if (p !== undefined) out.push({ status, path: p });
+        i += 2;
+      }
     }
   }
   const untracked = await git(['ls-files', '--others', '--exclude-standard', '-z'], cwd);
@@ -102,6 +130,11 @@ export interface AddedLine {
 }
 
 const MAX_SCAN_BYTES = 1024 * 1024;
+const MAX_UNTRACKED_FILES = 2000;
+
+/** Directories never worth scanning, even when (mis)untracked. */
+export const IGNORED_DIR_RE =
+  /(?:^|\/)(?:\.git|node_modules|dist|build|out|coverage|vendor|target|\.venv|venv|\.tox|__pycache__|\.next|\.nuxt|\.cache|\.donegate|\.idea|\.vscode)(?:\/|$)/;
 
 function looksBinary(buf: Buffer): boolean {
   const slice = buf.subarray(0, 8000);
@@ -110,17 +143,18 @@ function looksBinary(buf: Buffer): boolean {
 
 /**
  * Lines added between `base` and the working tree, per file.
- * Untracked files count as fully added.
+ * Untracked files count as fully added. Renamed files diff against their
+ * old contents, so a pure move adds no lines.
  */
 export async function addedLines(base: string, cwd: string): Promise<Map<string, AddedLine[]>> {
   const result = new Map<string, AddedLine[]>();
-  const diff = await git(['diff', '--no-color', '--unified=0', '--no-renames', base, '--'], cwd);
+  const diff = await git(['diff', '--no-color', '--unified=0', '--find-renames', base, '--'], cwd);
   if (diff.ok) {
     let current: string | null = null;
     let lineNo = 0;
     for (const raw of diff.stdout.split('\n')) {
       if (raw.startsWith('+++ ')) {
-        const p = raw.slice(4).trim();
+        const p = unquoteGitPath(raw.slice(4).trim());
         current = p === '/dev/null' ? null : p.replace(/^b\//, '');
         continue;
       }
@@ -139,7 +173,10 @@ export async function addedLines(base: string, cwd: string): Promise<Map<string,
   }
   const untracked = await git(['ls-files', '--others', '--exclude-standard', '-z'], cwd);
   if (untracked.ok) {
+    let scanned = 0;
     for (const p of untracked.stdout.split('\0').filter((p) => p.length > 0)) {
+      if (IGNORED_DIR_RE.test(p)) continue;
+      if (++scanned > MAX_UNTRACKED_FILES) break;
       try {
         const full = path.join(cwd, p);
         const stat = fs.statSync(full);

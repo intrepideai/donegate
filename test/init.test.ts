@@ -103,6 +103,56 @@ test('makefile fallback', () => {
   }
 });
 
+test('poetry, elixir, php, dotnet, deno, gradle detection', () => {
+  const cases: Array<{ files: Record<string, string>; expect: Array<[string, string]> }> = [
+    {
+      files: { 'pyproject.toml': '[tool.pytest.ini_options]\n', 'poetry.lock': '' },
+      expect: [['tests', 'poetry run pytest -q']],
+    },
+    {
+      files: { 'mix.exs': 'defmodule X.MixProject do\n' },
+      expect: [
+        ['format', 'mix format --check-formatted'],
+        ['tests', 'mix test'],
+      ],
+    },
+    {
+      files: { 'composer.json': '{"require-dev":{"phpunit/phpunit":"^11"}}' },
+      expect: [['tests', 'vendor/bin/phpunit']],
+    },
+    {
+      files: { 'Acme.sln': '' },
+      expect: [['tests', 'dotnet test']],
+    },
+    {
+      files: { 'deno.json': '{}' },
+      expect: [
+        ['check', 'deno check .'],
+        ['lint', 'deno lint'],
+        ['tests', 'deno test'],
+      ],
+    },
+    {
+      files: { 'build.gradle': '', gradlew: '#!/bin/sh\n' },
+      expect: [['tests', process.platform === 'win32' ? 'gradlew test' : './gradlew test']],
+    },
+  ];
+  for (const { files, expect } of cases) {
+    const root = tmpdir();
+    try {
+      for (const [rel, content] of Object.entries(files)) write(root, rel, content);
+      const detection = detectStack(root);
+      assert.deepEqual(
+        detection.checks.map((c) => [c.name, c.run]),
+        expect,
+        JSON.stringify(files),
+      );
+    } finally {
+      cleanup(root);
+    }
+  }
+});
+
 test('rendered DONE.md is parseable by donegate itself', () => {
   const root = tmpdir();
   try {

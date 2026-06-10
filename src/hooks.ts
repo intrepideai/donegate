@@ -38,10 +38,12 @@ function loadState(root: string): BounceState {
 }
 
 function saveState(root: string, state: BounceState): void {
-  // Prune sessions older than 24h so the file can't grow without bound.
+  // Prune sessions older than 24h (or with unparseable timestamps) so the
+  // file can't grow without bound.
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
   for (const [id, entry] of Object.entries(state.sessions)) {
-    if (new Date(entry.updated_at).getTime() < cutoff) delete state.sessions[id];
+    const t = new Date(entry?.updated_at ?? '').getTime();
+    if (Number.isNaN(t) || t < cutoff) delete state.sessions[id];
   }
   fs.mkdirSync(path.join(root, DONEGATE_DIR), { recursive: true });
   fs.writeFileSync(statePath(root), JSON.stringify(state, null, 2) + '\n');

@@ -10,6 +10,14 @@ export const HOOK_COMMANDS: Record<Exclude<InstallTarget, 'ci'>, { stop: string;
   cursor: { stop: 'npx -y donegate hook cursor', baseline: 'npx -y donegate baseline --if-missing --quiet' },
 };
 
+/**
+ * Agents kill hooks after a default timeout (Claude Code: 60s) — far too short
+ * for a real test suite. Installed hooks carry an explicit generous timeout;
+ * per-check limits in DONE.md are the real budget.
+ */
+const STOP_TIMEOUT_SECONDS = 1800;
+const BASELINE_TIMEOUT_SECONDS = 120;
+
 export interface InstallResult {
   target: InstallTarget;
   file: string;
@@ -41,8 +49,9 @@ function writeJson(file: string, data: Record<string, unknown>): void {
   fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
 }
 
-function containsDonegate(value: unknown): boolean {
-  return JSON.stringify(value ?? null).includes('donegate');
+/** Match only donegate's own hook commands, never a user's that mentions the word. */
+function isDonegateCommand(value: unknown): boolean {
+  return typeof value === 'string' && (value.includes('donegate hook') || value.includes('donegate baseline'));
 }
 
 type HookEntryList = Array<Record<string, unknown>>;
@@ -52,17 +61,18 @@ function mergeNestedHooks(
   config: Record<string, unknown>,
   eventName: string,
   command: string,
+  timeout: number,
 ): boolean {
   const hooks = (config.hooks ?? {}) as Record<string, unknown>;
   const eventList = (Array.isArray(hooks[eventName]) ? hooks[eventName] : []) as HookEntryList;
 
   const exists = eventList.some((matcherEntry) => {
     const inner = matcherEntry?.hooks;
-    return Array.isArray(inner) && inner.some((h) => containsDonegate((h as Record<string, unknown>)?.command));
+    return Array.isArray(inner) && inner.some((h) => isDonegateCommand((h as Record<string, unknown>)?.command));
   });
   if (exists) return false;
 
-  eventList.push({ hooks: [{ type: 'command', command }] });
+  eventList.push({ hooks: [{ type: 'command', command, timeout }] });
   hooks[eventName] = eventList;
   config.hooks = hooks;
   return true;
@@ -71,18 +81,23 @@ function mergeNestedHooks(
 function removeNestedHooks(config: Record<string, unknown>, eventName: string): boolean {
   const hooks = config.hooks as Record<string, unknown> | undefined;
   if (!hooks || !Array.isArray(hooks[eventName])) return false;
-  const before = (hooks[eventName] as HookEntryList).length;
+  let removed = 0;
   const filtered = (hooks[eventName] as HookEntryList)
     .map((matcherEntry) => {
       const inner = matcherEntry?.hooks;
       if (!Array.isArray(inner)) return matcherEntry;
-      const keep = inner.filter((h) => !containsDonegate((h as Record<string, unknown>)?.command));
+      const keep = inner.filter((h) => {
+        const ours = isDonegateCommand((h as Record<string, unknown>)?.command);
+        if (ours) removed++;
+        return !ours;
+      });
       return { ...matcherEntry, hooks: keep };
     })
-    .filter((entry) => Array.isArray(entry.hooks) && (entry.hooks as unknown[]).length > 0);
+    .filter((entry) => !Array.isArray(entry.hooks) || (entry.hooks as unknown[]).length > 0);
+  if (removed === 0) return false;
   hooks[eventName] = filtered;
   if (filtered.length === 0) delete hooks[eventName];
-  return before !== filtered.length || before > 0;
+  return true;
 }
 
 function configPath(target: Exclude<InstallTarget, 'ci'>, root: string, global: boolean): string {
@@ -110,21 +125,21 @@ export function installAgent(
   if (target === 'cursor') {
     if (config.version === undefined) config.version = 1;
     const hooks = (config.hooks ?? {}) as Record<string, unknown>;
-    for (const [event, command] of [
-      ['stop', commands.stop],
-      ['sessionStart', commands.baseline],
+    for (const [event, command, timeout] of [
+      ['stop', commands.stop, STOP_TIMEOUT_SECONDS],
+      ['sessionStart', commands.baseline, BASELINE_TIMEOUT_SECONDS],
     ] as const) {
       const list = (Array.isArray(hooks[event]) ? hooks[event] : []) as HookEntryList;
-      if (!list.some((h) => containsDonegate(h?.command))) {
-        list.push({ command });
+      if (!list.some((h) => isDonegateCommand(h?.command))) {
+        list.push({ command, timeout });
         hooks[event] = list;
         changed = true;
       }
     }
     config.hooks = hooks;
   } else {
-    changed = mergeNestedHooks(config, 'Stop', commands.stop) || changed;
-    changed = mergeNestedHooks(config, 'SessionStart', commands.baseline) || changed;
+    changed = mergeNestedHooks(config, 'Stop', commands.stop, STOP_TIMEOUT_SECONDS) || changed;
+    changed = mergeNestedHooks(config, 'SessionStart', commands.baseline, BASELINE_TIMEOUT_SECONDS) || changed;
   }
 
   if (!changed) return { target, file, action: 'already-installed' };
@@ -148,7 +163,7 @@ export function uninstallAgent(
       for (const event of ['stop', 'sessionStart']) {
         if (Array.isArray(hooks[event])) {
           const before = (hooks[event] as HookEntryList).length;
-          hooks[event] = (hooks[event] as HookEntryList).filter((h) => !containsDonegate(h?.command));
+          hooks[event] = (hooks[event] as HookEntryList).filter((h) => !isDonegateCommand(h?.command));
           if ((hooks[event] as HookEntryList).length !== before) changed = true;
           if ((hooks[event] as HookEntryList).length === 0) delete hooks[event];
         }

@@ -1,0 +1,22 @@
+name: Feature request
+description: A guard pattern, a stack detection, an agent adapter, or something new
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What should donegate do?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: What cheat or gap does this close?
+      description: donegate stays small and deterministic — the strongest pitch is a concrete way an agent games a gate today.
+  - type: checkboxes
+    id: fit
+    attributes:
+      label: Fit check
+      options:
+        - label: This keeps donegate deterministic (no LLM calls, no network)
+        - label: This doesn't require a runtime dependency

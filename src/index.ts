@@ -12,6 +12,7 @@ export { createBaseline, writeBaseline, loadBaseline } from './baseline.js';
 export { buildReceipt, loadLatestReceipt, renderMarkdown, renderTerminal } from './receipt.js';
 export { buildReason, runStopHook, runBaselineHook } from './hooks.js';
 export { detectStack, renderDonefile, initDonefile } from './init.js';
+export { renderStatus } from './status.js';
 export { parseYaml, YamlError } from './yaml.js';
 export { VERSION } from './version.js';
 export type {

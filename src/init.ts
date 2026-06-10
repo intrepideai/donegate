@@ -88,8 +88,11 @@ export function detectStack(root: string): Detection {
     (readIfExists(path.join(root, 'setup.cfg'))?.includes('[tool:pytest]') ?? false);
   if (pyproject || hasPytestIni) {
     stack.push('python');
-    const uv = fs.existsSync(path.join(root, 'uv.lock'));
-    const prefix = uv ? 'uv run ' : '';
+    const prefix = fs.existsSync(path.join(root, 'uv.lock'))
+      ? 'uv run '
+      : fs.existsSync(path.join(root, 'poetry.lock'))
+        ? 'poetry run '
+        : '';
     const text = pyproject ?? '';
 
     if (text.includes('ruff') || fs.existsSync(path.join(root, 'ruff.toml'))) {
@@ -126,13 +129,81 @@ export function detectStack(root: string): Detection {
     if (gemfile.includes('rubocop')) push({ name: 'lint', run: 'bundle exec rubocop' });
   }
 
-  // ── Makefile fallback ──────────────────────────────────────────────────────
+  // ── Java / Kotlin (gradle, maven) ──────────────────────────────────────────
+  if (fs.existsSync(path.join(root, 'gradlew')) || fs.existsSync(path.join(root, 'build.gradle')) || fs.existsSync(path.join(root, 'build.gradle.kts'))) {
+    stack.push('gradle');
+    const gradle = fs.existsSync(path.join(root, 'gradlew'))
+      ? process.platform === 'win32'
+        ? 'gradlew'
+        : './gradlew'
+      : 'gradle';
+    push({ name: 'tests', run: `${gradle} test`, timeout: 1800 });
+  } else if (fs.existsSync(path.join(root, 'pom.xml'))) {
+    stack.push('maven');
+    const mvn = fs.existsSync(path.join(root, 'mvnw'))
+      ? process.platform === 'win32'
+        ? 'mvnw'
+        : './mvnw'
+      : 'mvn';
+    push({ name: 'tests', run: `${mvn} -q test`, timeout: 1800 });
+  }
+
+  // ── .NET ───────────────────────────────────────────────────────────────────
+  let rootEntries: string[] = [];
+  try {
+    rootEntries = fs.readdirSync(root);
+  } catch {
+    // unreadable root — nothing more to detect
+  }
+  if (rootEntries.some((f) => f.endsWith('.sln') || f.endsWith('.csproj') || f.endsWith('.fsproj'))) {
+    stack.push('dotnet');
+    push({ name: 'tests', run: 'dotnet test', timeout: 1800 });
+  }
+
+  // ── Elixir ─────────────────────────────────────────────────────────────────
+  if (fs.existsSync(path.join(root, 'mix.exs'))) {
+    stack.push('elixir');
+    push({ name: 'format', run: 'mix format --check-formatted' });
+    push({ name: 'tests', run: 'mix test', timeout: 900 });
+  }
+
+  // ── PHP ────────────────────────────────────────────────────────────────────
+  const composer = readIfExists(path.join(root, 'composer.json'));
+  if (composer) {
+    stack.push('php');
+    if (composer.includes('phpunit') || fs.existsSync(path.join(root, 'phpunit.xml')) || fs.existsSync(path.join(root, 'phpunit.xml.dist'))) {
+      push({ name: 'tests', run: 'vendor/bin/phpunit', timeout: 900 });
+    }
+    if (composer.includes('phpstan')) push({ name: 'analyse', run: 'vendor/bin/phpstan analyse' });
+  }
+
+  // ── Swift ──────────────────────────────────────────────────────────────────
+  if (fs.existsSync(path.join(root, 'Package.swift'))) {
+    stack.push('swift');
+    push({ name: 'tests', run: 'swift test', timeout: 1800 });
+  }
+
+  // ── Deno ───────────────────────────────────────────────────────────────────
+  if (fs.existsSync(path.join(root, 'deno.json')) || fs.existsSync(path.join(root, 'deno.jsonc'))) {
+    stack.push('deno');
+    push({ name: 'check', run: 'deno check .' });
+    push({ name: 'lint', run: 'deno lint' });
+    push({ name: 'tests', run: 'deno test' });
+  }
+
+  // ── Makefile / justfile fallback ───────────────────────────────────────────
   if (checks.length === 0) {
     const makefile = readIfExists(path.join(root, 'Makefile'));
     if (makefile) {
       stack.push('make');
       if (/^test:/m.test(makefile)) push({ name: 'tests', run: 'make test' });
       if (/^lint:/m.test(makefile)) push({ name: 'lint', run: 'make lint' });
+    }
+    const justfile = readIfExists(path.join(root, 'justfile')) ?? readIfExists(path.join(root, 'Justfile'));
+    if (justfile && checks.length === 0) {
+      stack.push('just');
+      if (/^test\b/m.test(justfile)) push({ name: 'tests', run: 'just test' });
+      if (/^lint\b/m.test(justfile)) push({ name: 'lint', run: 'just lint' });
     }
   }
 

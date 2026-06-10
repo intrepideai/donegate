@@ -105,6 +105,26 @@ const COUNTERS: Array<{ ext: RegExp; tests: RegExp; skips: RegExp }> = [
     tests: /^\s*(?:it|test|scenario)\s+['"]/gm,
     skips: /^\s*(?:xit|xdescribe|xspecify)\s+['"]|,\s*skip(?::|\s*=>)/gm,
   },
+  {
+    ext: /\.exs$/,
+    tests: /^\s*test\s+["']/gm,
+    skips: /@(?:module)?tag\s+:skip\b/g,
+  },
+  {
+    ext: /\.cs$/,
+    tests: /\[\s*(?:Fact|Theory|Test|TestMethod)\b/g,
+    skips: /\[\s*(?:Fact|Theory)\s*\(\s*Skip\s*=|\[\s*Ignore\b/g,
+  },
+  {
+    ext: /\.php$/,
+    tests: /function\s+test[A-Z_0-9]|#\[Test\]|@test\b/g,
+    skips: /markTestSkipped|markTestIncomplete/g,
+  },
+  {
+    ext: /\.swift$/,
+    tests: /func\s+test[A-Z_0-9]|@Test\b/g,
+    skips: /XCTSkip(?:If|Unless)?\(/g,
+  },
 ];
 
 export function countTests(relPath: string, content: string): Counts {
