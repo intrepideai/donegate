@@ -2,9 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadConfig } from '../src/donefile.js';
 import { writeBaseline } from '../src/baseline.js';
+import { verify } from '../src/check.js';
 import { resolveComparison, runGuards } from '../src/guards.js';
 import type { GuardResult } from '../src/types.js';
-import { BASIC_DONEFILE, cleanup, gitCommitAll, gitInit, read, rm, tmpdir, write } from './helpers.js';
+import { BASIC_DONEFILE, cleanup, gitCommitAll, gitHead, gitInit, read, rm, tmpdir, write } from './helpers.js';
 
 const TEST_FILE = `import { test } from 'node:test';
 
@@ -292,6 +293,109 @@ test('outside git WITH baseline: snapshot comparisons still work', async () => {
     write(root, 'test/app.test.ts', "import { test } from 'node:test';\ntest('one', () => {});\n");
     const results = await runGuards(config, await resolveComparison(config));
     assert.equal(guard(results, 'no_deleted_tests').status, 'fail');
+  } finally {
+    cleanup(root);
+  }
+});
+
+const PROTECT_DONEFILE = `# DoD
+\`\`\`yaml
+checks:
+  - name: ok
+    run: node -e "process.exit(0)"
+guards:
+  protect:
+    - package.json
+    - "*.config.js"
+\`\`\`
+`;
+
+const PKG_JSON = '{ "scripts": { "test": "node run-tests.js" } }\n';
+
+async function setupProtectRepo(): Promise<string> {
+  const root = tmpdir();
+  gitInit(root);
+  write(root, 'DONE.md', PROTECT_DONEFILE);
+  write(root, 'package.json', PKG_JSON);
+  gitCommitAll(root, 'base');
+  return root;
+}
+
+test('no_protected_edits: pinned files cannot be changed, deleted, or shadowed quietly', async () => {
+  const root = await setupProtectRepo();
+  try {
+    const config = loadConfig(root);
+    await writeBaseline(config);
+
+    // modified — redefining what `npm test` means
+    write(root, 'package.json', '{ "scripts": { "test": "exit 0" } }\n');
+    let g = guard(await runGuards(config, await resolveComparison(config)), 'no_protected_edits');
+    assert.equal(g.status, 'fail');
+    assert.match(g.findings[0]!.detail, /modified since the baseline/);
+
+    // deleted
+    rm(root, 'package.json');
+    g = guard(await runGuards(config, await resolveComparison(config)), 'no_protected_edits');
+    assert.equal(g.status, 'fail');
+    assert.match(g.findings[0]!.detail, /missing/);
+
+    // restored byte-for-byte → clean again; a NEW file matching protect globs is not
+    write(root, 'package.json', PKG_JSON);
+    g = guard(await runGuards(config, await resolveComparison(config)), 'no_protected_edits');
+    assert.equal(g.status, 'pass');
+    write(root, 'extra.config.js', 'module.exports = {};\n');
+    g = guard(await runGuards(config, await resolveComparison(config)), 'no_protected_edits');
+    assert.equal(g.status, 'fail');
+    assert.match(g.findings[0]!.detail, /new file matches/);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('no_protected_edits: falls back to the git diff when there is no baseline (CI mode)', async () => {
+  const root = await setupProtectRepo();
+  try {
+    const config = loadConfig(root);
+    write(root, 'package.json', '{ "scripts": { "test": "exit 0" } }\n');
+    const g = guard(await runGuards(config, await resolveComparison(config)), 'no_protected_edits');
+    assert.equal(g.status, 'fail');
+    assert.match(g.findings[0]!.detail, /changed in this diff/);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('check --against judges an explicit ref — even past a re-blessed baseline', async () => {
+  const root = await setupRepo();
+  try {
+    const base = gitHead(root);
+    await writeBaseline(loadConfig(root));
+
+    // skip a test, commit it, and re-bless the baseline: a session comparison
+    // is now blind to the skip. The explicit ref is not.
+    write(root, 'test/app.test.ts', TEST_FILE.replace("test('two'", "test.skip('two'"));
+    gitCommitAll(root, 'sneaky');
+    await writeBaseline(loadConfig(root));
+
+    const blessed = await verify({ cwd: root, config: loadConfig(root), via: 'cli' });
+    assert.equal(blessed.exitCode, 0);
+
+    const judged = await verify({ cwd: root, config: loadConfig(root), comparisonRef: base, via: 'cli' });
+    assert.equal(judged.receipt.baseline.kind, 'explicit');
+    assert.equal(judged.exitCode, 3);
+    assert.ok(judged.receipt.guards.some((g) => g.name === 'no_new_skips' && g.status === 'fail'));
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('check --against refuses a ref that does not exist', async () => {
+  const root = await setupRepo();
+  try {
+    await assert.rejects(
+      verify({ cwd: root, config: loadConfig(root), comparisonRef: 'not-a-ref', via: 'cli' }),
+      /not a commit/,
+    );
   } finally {
     cleanup(root);
   }

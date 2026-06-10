@@ -1,5 +1,6 @@
 import type { CheckRunSummary, DoneConfig, Receipt } from './types.js';
-import { loadConfig } from './donefile.js';
+import { DonefileError, loadConfig } from './donefile.js';
+import { refExists } from './git.js';
 import { resolveComparison, runGuards } from './guards.js';
 import { runChecks } from './runner.js';
 import { buildReceipt, writeReceipt } from './receipt.js';
@@ -11,6 +12,13 @@ export interface CheckOptions {
   only?: string[];
   /** Skip tamper guards entirely. */
   noGuards?: boolean;
+  /** Skip checks entirely — guards only (the subagent-boundary fast path). */
+  noChecks?: boolean;
+  /**
+   * Compare against this git ref instead of the session baseline / HEAD /
+   * merge-base (the CLI's `--against`). Judge mode: evaluates a diff.
+   */
+  comparisonRef?: string;
   via?: Receipt['via'];
   onCheckResult?: (result: CheckResult, index: number) => void;
   /** Pre-loaded config (skips discovery). */
@@ -32,9 +40,17 @@ export async function verify(options: CheckOptions = {}): Promise<CheckRunSummar
   const config = options.config ?? loadConfig(cwd);
   const startedAt = new Date();
 
-  const comparison = await resolveComparison(config);
+  if (options.comparisonRef && !(await refExists(options.comparisonRef, config.root))) {
+    // A judge that silently judges nothing is worse than no judge — a bad ref
+    // would make every git diff come back empty and every guard pass.
+    throw new DonefileError(`--against ref "${options.comparisonRef}" is not a commit in this repository`);
+  }
 
-  const checks = await runChecks(config.checks, config.root, options.onCheckResult, options.only);
+  const comparison = await resolveComparison(config, options.comparisonRef);
+
+  const checks = options.noChecks
+    ? []
+    : await runChecks(config.checks, config.root, options.onCheckResult, options.only);
 
   const guards = options.noGuards ? [] : await runGuards(config, comparison);
 

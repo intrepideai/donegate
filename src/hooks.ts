@@ -20,7 +20,7 @@ interface HookPayload {
 }
 
 interface BounceState {
-  sessions: Record<string, { bounces: number; updated_at: string }>;
+  sessions: Record<string, { bounces: number; updated_at: string; best?: number }>;
 }
 
 function statePath(root: string): string {
@@ -168,26 +168,58 @@ function findOrphanedBaseline(cwd: string): { root: string; baseline: Baseline }
   }
 }
 
-/** Block the stop (incrementing the session's bounce count), or give up loudly once the budget is spent. */
+/**
+ * Block the stop (incrementing the session's bounce count), or give up loudly
+ * once the budget is spent.
+ *
+ * The budget counts *consecutive bounces without new progress*. When `score`
+ * is provided (failing checks + tripped guards), a score strictly below the
+ * session's best refreshes the budget: an agent steadily fixing a long list
+ * shouldn't be cut off mid-fix. Best-ever (not last-attempt) is the bar, so
+ * oscillating between two failure sets can't farm refreshes — total bounces
+ * stay bounded by max_bounces × (initial score + 1).
+ */
 function bounceOrGiveUp(options: {
   agent: HookAgent;
   root: string;
   sessionId: string;
   maxBounces: number;
+  score?: number;
   reason: (attempt: number) => string;
   giveUp: (bounces: number) => string;
 }): HookOutcome {
   const state = loadState(options.root);
-  const bounces = state.sessions[options.sessionId]?.bounces ?? 0;
+  const entry = state.sessions[options.sessionId];
+  let bounces = entry?.bounces ?? 0;
+  let best = entry?.best;
+  let refreshed = false;
+
+  if (typeof options.score === 'number') {
+    if (typeof best !== 'number') {
+      best = options.score; // first scored attempt sets the bar
+    } else if (options.score < best) {
+      best = options.score;
+      refreshed = true;
+      bounces = 0;
+    }
+  }
 
   if (bounces >= options.maxBounces) {
     return { stdout: null, stderr: options.giveUp(bounces), exitCode: 0 };
   }
 
   const attempt = bounces + 1;
-  state.sessions[options.sessionId] = { bounces: attempt, updated_at: new Date().toISOString() };
+  state.sessions[options.sessionId] = {
+    bounces: attempt,
+    updated_at: new Date().toISOString(),
+    ...(typeof best === 'number' ? { best } : {}),
+  };
   saveState(options.root, state);
-  const reason = options.reason(attempt);
+
+  let reason = options.reason(attempt);
+  if (refreshed) {
+    reason += '\n\n(donegate noticed progress since the last attempt — the bounce budget was refreshed.)';
+  }
 
   if (options.agent === 'cursor') {
     return { stdout: JSON.stringify({ followup_message: reason }), stderr: null, exitCode: 0 };
@@ -196,7 +228,11 @@ function bounceOrGiveUp(options: {
   return { stdout: JSON.stringify({ decision: 'block', reason }), stderr: null, exitCode: 0 };
 }
 
-export async function runStopHook(agent: HookAgent, rawStdin: string): Promise<HookOutcome> {
+export async function runStopHook(
+  agent: HookAgent,
+  rawStdin: string,
+  mode: { subagent?: boolean } = {},
+): Promise<HookOutcome> {
   const payload = parsePayload(rawStdin);
   const cwd = resolveCwd(payload);
 
@@ -206,6 +242,9 @@ export async function runStopHook(agent: HookAgent, rawStdin: string): Promise<H
   }
 
   const sessionId = payload.session_id ?? payload.conversation_id ?? 'default';
+  // Subagent boundaries get their own bounce ledger — a noisy fan-out must
+  // not burn the budget the terminal stop gate relies on.
+  const stateKey = mode.subagent ? `${sessionId}:subagent` : sessionId;
 
   // No DONE.md → never interfere. A globally-installed hook must be a no-op in
   // repos that haven't opted in. The exception is a session baseline whose
@@ -218,7 +257,7 @@ export async function runStopHook(agent: HookAgent, rawStdin: string): Promise<H
     return bounceOrGiveUp({
       agent,
       root: orphan.root,
-      sessionId,
+      sessionId: stateKey,
       // The donefile (and its gate.max_bounces with it) is gone — use the default.
       maxBounces: DEFAULT_MAX_BOUNCES,
       reason: (attempt) =>
@@ -253,7 +292,7 @@ export async function runStopHook(agent: HookAgent, rawStdin: string): Promise<H
         return bounceOrGiveUp({
           agent,
           root: found.root,
-          sessionId,
+          sessionId: stateKey,
           // The config is unreadable, so its gate.max_bounces is too — use the default.
           maxBounces: DEFAULT_MAX_BOUNCES,
           reason: (attempt) =>
@@ -273,18 +312,27 @@ export async function runStopHook(agent: HookAgent, rawStdin: string): Promise<H
   }
 
   // Always verify — the receipt should reflect reality even when we've stopped
-  // blocking. We give up on bouncing, never on checking.
-  const summary = await verify({ cwd, config, via: agent });
+  // blocking. We give up on bouncing, never on checking. Subagent boundaries
+  // run guards only: a tamper scan is cheap enough to pay per subagent, a test
+  // suite is not — checks belong to the terminal stop.
+  const summary = await verify({
+    cwd,
+    config,
+    via: mode.subagent ? 'subagent' : agent,
+    noChecks: mode.subagent,
+  });
 
   if (summary.exitCode === 0) {
     const state = loadState(config.root);
-    if (state.sessions[sessionId]) {
-      delete state.sessions[sessionId];
+    if (state.sessions[stateKey]) {
+      delete state.sessions[stateKey];
       saveState(config.root, state);
     }
     return {
       stdout: null,
-      stderr: `donegate: ✓ DONE — ${summary.receipt.checks.length} checks passed, guards clean (receipt: ${path.join(DONEGATE_DIR, 'receipts', 'latest.json')})`,
+      stderr: mode.subagent
+        ? `donegate: ✓ subagent boundary clean — guards pass (receipt: ${path.join(DONEGATE_DIR, 'receipts', 'latest.json')})`
+        : `donegate: ✓ DONE — ${summary.receipt.checks.length} checks passed, guards clean (receipt: ${path.join(DONEGATE_DIR, 'receipts', 'latest.json')})`,
       exitCode: 0,
     };
   }
@@ -292,8 +340,11 @@ export async function runStopHook(agent: HookAgent, rawStdin: string): Promise<H
   return bounceOrGiveUp({
     agent,
     root: config.root,
-    sessionId,
+    sessionId: stateKey,
     maxBounces: config.gate.max_bounces,
+    // Progress = strictly fewer failing checks + tripped guards than the
+    // session's best so far; progress refreshes the bounce budget.
+    score: summary.checksFailed + summary.guardsFailed,
     reason: (attempt) => buildReason(summary, attempt, config.gate.max_bounces),
     giveUp: (bounces) =>
       `donegate: ✗ still NOT DONE after ${bounces} bounce${bounces > 1 ? 's' : ''} — giving up and allowing the stop. The receipt is red: ${path.join(DONEGATE_DIR, 'receipts', 'latest.json')}`,

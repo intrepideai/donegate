@@ -36,8 +36,10 @@ const DEFAULT_GUARDS: GuardsConfig = {
   no_disabled_lint: true,
   no_new_todos: 'warn',
   no_debug_artifacts: 'warn',
+  no_protected_edits: true,
   test_globs: DEFAULT_TEST_GLOBS,
   exclude: [],
+  protect: [],
 };
 
 /** Bounce budget used when there is no (readable) donefile to say otherwise. */
@@ -156,7 +158,12 @@ export function parseDonefileSource(source: string, sourcePath: string, root: st
     checks.push({ name, run, timeout });
   }
 
-  const guards: GuardsConfig = { ...DEFAULT_GUARDS, test_globs: [...DEFAULT_TEST_GLOBS], exclude: [] };
+  const guards: GuardsConfig = {
+    ...DEFAULT_GUARDS,
+    test_globs: [...DEFAULT_TEST_GLOBS],
+    exclude: [],
+    protect: [],
+  };
   if (data.guards !== undefined) {
     if (!isRecord(data.guards)) throw new DonefileError('"guards" must be a map');
     for (const [key, value] of Object.entries(data.guards)) {
@@ -167,10 +174,12 @@ export function parseDonefileSource(source: string, sourcePath: string, root: st
         case 'no_disabled_lint':
         case 'no_new_todos':
         case 'no_debug_artifacts':
+        case 'no_protected_edits':
           guards[key] = asGuardLevel(value, key);
           break;
         case 'test_globs':
         case 'exclude':
+        case 'protect':
           if (!Array.isArray(value) || value.some((v) => typeof v !== 'string')) {
             throw new DonefileError(`guards.${key} must be a list of glob strings`);
           }

@@ -171,3 +171,29 @@ test('ensureGitignore appends once', () => {
     cleanup(root);
   }
 });
+
+test('claude install wires the subagent boundary; uninstall removes it', () => {
+  const root = tmpdir();
+  try {
+    installAgent('claude', root);
+    const config = JSON.parse(read(root, '.claude/settings.json'));
+    assert.match(config.hooks.SubagentStop[0].hooks[0].command, /donegate hook claude --subagent/);
+
+    uninstallAgent('claude', root);
+    const after = JSON.parse(read(root, '.claude/settings.json'));
+    assert.equal(after.hooks.SubagentStop, undefined);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('codex and cursor get no subagent hook (no such event)', () => {
+  const root = tmpdir();
+  try {
+    installAgent('codex', root);
+    const config = JSON.parse(read(root, '.codex/hooks.json'));
+    assert.equal(config.hooks.SubagentStop, undefined);
+  } finally {
+    cleanup(root);
+  }
+});

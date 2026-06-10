@@ -47,11 +47,13 @@ ${bold('COMMANDS')}
 
 ${bold('OPTIONS')}
   check:     --only <names>   run a subset (comma-separated)
+             --against <ref>  judge the diff vs an explicit git ref
              --no-guards      skip tamper guards
              --json           print the receipt as JSON
              --quiet          verdict only
   install:   --global         install to ~/.claude, ~/.codex, or ~/.cursor
   baseline:  --if-missing     only record when no baseline exists
+  hook:      --subagent       guards-only gate (SubagentStop boundaries)
   all:       -h, --help, -V, --version
 
 ${bold('EXIT CODES')}
@@ -133,10 +135,11 @@ async function cmdInit(argv: string[]): Promise<number> {
 }
 
 async function cmdCheck(argv: string[]): Promise<number> {
-  const flags = parseFlags(argv, ['only']);
+  const flags = parseFlags(argv, ['only', 'against']);
   const json = flags.bool.has('json');
   const quiet = flags.bool.has('quiet');
   const only = flags.values.get('only')?.split(',').map((s) => s.trim()).filter(Boolean);
+  const against = flags.values.get('against');
 
   const config = loadConfig(process.cwd());
   if (only) {
@@ -157,6 +160,7 @@ async function cmdCheck(argv: string[]): Promise<number> {
     config,
     only,
     noGuards: flags.bool.has('no-guards'),
+    comparisonRef: against,
     via: 'cli',
     onCheckResult: (result) => {
       if (!json && !quiet) process.stdout.write(renderCheckLine(result) + '\n');
@@ -283,12 +287,17 @@ async function cmdReceipt(argv: string[]): Promise<number> {
 }
 
 async function cmdHook(argv: string[]): Promise<number> {
-  const agent = argv[0] as HookAgent | undefined;
+  const flags = parseFlags(argv);
+  const agent = flags.positional[0] as HookAgent | undefined;
   if (!agent || !['claude', 'codex', 'cursor'].includes(agent)) {
-    fail('usage: donegate hook <claude | codex | cursor>');
+    fail('usage: donegate hook <claude | codex | cursor> [--subagent]');
+  }
+  const subagent = flags.bool.has('subagent');
+  if (subagent && agent !== 'claude') {
+    fail('--subagent is only supported for claude (SubagentStop hooks)');
   }
   const stdin = await readStdin();
-  const outcome = await runStopHook(agent, stdin);
+  const outcome = await runStopHook(agent, stdin, { subagent });
   if (outcome.stdout) process.stdout.write(outcome.stdout + '\n');
   if (outcome.stderr) process.stderr.write(outcome.stderr + '\n');
   return outcome.exitCode;

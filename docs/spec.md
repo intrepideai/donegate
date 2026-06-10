@@ -40,14 +40,24 @@ guards:               # optional — tamper detection levels
   no_disabled_lint: true     # eslint-disable/noqa/@ts-ignore/nolint added
   no_new_todos: warn         # TODO/FIXME/HACK introduced
   no_debug_artifacts: warn   # console.log/debugger/pdb.set_trace left behind
+  no_protected_edits: true   # files matching `protect` changed mid-session
   test_globs:                # optional — what counts as a test file
     ["**/*.test.*", "**/*.spec.*", "**/test_*.py", "**/*_test.go", "..."]
   exclude: []                # optional — files exempt from guard analysis
                              # (for code that legitimately CONTAINS the
                              # patterns: lint configs, scanners, donegate itself)
+  protect: []                # optional — globs for files the verdict depends on
+                             # but the gate doesn't run: the files that define
+                             # what the check commands MEAN (package.json,
+                             # eslint/jest/pytest/tsconfig configs). Hashed into
+                             # the baseline; any change, deletion, or new
+                             # shadowing file trips no_protected_edits.
 
 gate:                 # optional
-  max_bounces: 3      # stop-hook re-prompts per session before giving up (1-20)
+  max_bounces: 3      # consecutive no-progress stop-hook re-prompts per
+                      # session before giving up (1-20); progress — a strictly
+                      # lower failing-check + tripped-guard count than the
+                      # session's best — refreshes the budget
 ```
 
 Guard levels: `true` (findings fail the gate), `"warn"` (findings are reported
@@ -73,9 +83,16 @@ pass?"* Guards ask ***"was the bar lowered so it would pass?"*** They compare
 the current tree against a **baseline**:
 
 1. a **session baseline** recorded when an agent session starts (test-file
-   hashes, test/skip counts, the DONE.md hash, and the git HEAD at that moment), or
+   hashes, test/skip counts, hashes of `guards.protect` files, the DONE.md
+   hash, and the git HEAD at that moment), or
 2. **HEAD**, when there's uncommitted work and no session baseline, or
 3. the **merge-base with the default branch**, for clean trees (the CI case).
+
+An **explicit ref** (`donegate check --against <ref>`) overrides all three,
+including the session baseline: judge mode evaluates a diff, not a session.
+The verdict is then derivable from git history alone — useful for grading
+fan-out worktrees from a workflow script, pinning CI to the PR base, or
+re-deriving a verdict past a re-blessed baseline.
 
 All guard findings are deterministic, diff-based, and cite `file:line`
 evidence. Guards never call a model and never make network requests.
@@ -110,9 +127,14 @@ tries to finish:
   output tails, guard findings with file:line) is fed back to the agent, which
   keeps working. Each block increments a per-session **bounce counter**.
 - **pass** → the stop proceeds; the bounce counter resets; the receipt is green.
-- **bounces exhausted** (`gate.max_bounces`) → the gate stops *blocking* but
-  never stops *verifying*: the stop is allowed with a loud warning and a red
-  receipt. The gate must not be able to trap an agent in an infinite loop.
+- **progress** → a stop attempt whose failure count (failing checks + tripped
+  guards) is strictly below the session's best **refreshes the bounce budget**:
+  an agent steadily working down a list is never cut off mid-fix. Best-ever is
+  the bar, so alternating between failure sets cannot farm refreshes.
+- **bounces exhausted** (`gate.max_bounces` consecutive attempts without new
+  progress) → the gate stops *blocking* but never stops *verifying*: the stop
+  is allowed with a loud warning and a red receipt. The gate must not be able
+  to trap an agent in an infinite loop.
 - a repo **without** a DONE.md → the hook is a silent no-op. A **broken**
   DONE.md → warn and allow (a config typo must never wedge an agent).
 - user-initiated aborts are never blocked.

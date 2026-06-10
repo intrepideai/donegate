@@ -135,3 +135,13 @@ test('findDonefile walks upward and prefers DONE.md', () => {
     cleanup(root);
   }
 });
+
+test('parses guards.protect and no_protected_edits', () => {
+  const config = parseDonefileSource(
+    'checks:\n  - name: a\n    run: x\nguards:\n  no_protected_edits: warn\n  protect:\n    - package.json\n    - "*.config.js"\n',
+    '/repo/done.yml',
+    '/repo',
+  );
+  assert.deepEqual(config.guards.protect, ['package.json', '*.config.js']);
+  assert.equal(config.guards.no_protected_edits, 'warn');
+});

@@ -21,6 +21,8 @@ export interface GuardsConfig {
   no_disabled_lint: GuardLevel;
   no_new_todos: GuardLevel;
   no_debug_artifacts: GuardLevel;
+  /** Findings when files matching `protect` change mid-session. */
+  no_protected_edits: GuardLevel;
   /** Glob patterns that identify test files. */
   test_globs: string[];
   /**
@@ -28,6 +30,13 @@ export interface GuardsConfig {
    * skip/suppression patterns (lint configs, pattern scanners, donegate itself).
    */
   exclude: string[];
+  /**
+   * Globs for files the verdict depends on but the gate doesn't run — the
+   * files that define what the check commands *mean* (package.json, lint/
+   * test/build configs). Hashed into the baseline; changes trip
+   * `no_protected_edits`.
+   */
+  protect: string[];
 }
 
 export interface GateConfig {
@@ -74,7 +83,7 @@ export interface GuardResult {
   note?: string;
 }
 
-export type BaselineKind = 'session' | 'head' | 'merge-base' | 'none';
+export type BaselineKind = 'session' | 'head' | 'merge-base' | 'explicit' | 'none';
 
 export interface BaselineFileEntry {
   sha: string;
@@ -90,6 +99,8 @@ export interface Baseline {
   donefile_sha: string;
   donefile_path: string;
   test_files: Record<string, BaselineFileEntry>;
+  /** Hashes of files matching guards.protect (absent when protect is empty). */
+  protected_files?: Record<string, { sha: string }>;
 }
 
 export interface ComparisonContext {
@@ -128,7 +139,7 @@ export interface Receipt {
   checks: CheckResult[];
   guards: GuardResult[];
   /** Which surface produced the receipt. */
-  via: 'cli' | 'claude' | 'codex' | 'cursor' | 'run';
+  via: 'cli' | 'claude' | 'codex' | 'cursor' | 'run' | 'subagent';
   /** sha256 of the receipt body (excluding this field). */
   receipt_sha: string;
 }

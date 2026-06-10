@@ -20,6 +20,8 @@ Deterministic, diff-based, with `file:line` receipts:
 | DONE.md edited mid-session | `no_done_edits` → exit 3 |
 | DONE.md **deleted** mid-session | stop bounced — the baseline remembers it existed |
 | DONE.md **broken** mid-session (no longer parses) | stop bounced — its hash no longer matches the baseline |
+| a `guards.protect` file changed/deleted/shadowed (package.json, lint config) | `no_protected_edits` → exit 3 |
+| a subagent tampering inside a fan-out | `SubagentStop` guard scan bounces it at its own boundary |
 
 Exit 3 — *"checks pass but the bar was lowered to get there"* — is
 deliberately a distinct, alarmable signal.
@@ -35,12 +37,16 @@ that rather than guess it:
   count stays flat), updating snapshots to bake a bug in, or writing both the
   bug and the test that blesses it. Catching these means judging *meaning*; a
   diff and a regex can't, and donegate refuses to guess.
-- **Command indirection.** DONE.md is hash-guarded, but `run: npm test`
-  resolves through package.json — and package.json, jest.config, pytest.ini,
-  tsconfig, and the linter config are all agent-editable. `"test": "exit 0"`
-  is green. Mitigations: prefer direct invocations in your checks
-  (`npx vitest run` rather than `npm test`) and treat tooling-config diffs as
-  review-worthy, because they are.
+- **Command indirection — unless you pin it.** DONE.md is hash-guarded, but
+  `run: npm test` resolves through package.json — and package.json,
+  jest.config, pytest.ini, tsconfig, and the linter config are all
+  agent-editable. `"test": "exit 0"` is green. The fix is `guards.protect`:
+  list those files and they're hashed into the baseline; any change, deletion,
+  or new shadowing config trips `no_protected_edits`. What protect *can't* do
+  is know which files you forgot to list — prefer direct invocations in your
+  checks (`npx vitest run` rather than `npm test`), protect the configs those
+  tools read, and treat tooling-config diffs as review-worthy, because they
+  are.
 - **Attacks on donegate's own state.** An agent with shell access can run
   `donegate baseline` to bless its own donefile edit, hand-edit
   `.donegate/state.json` to burn the bounce budget, or patch

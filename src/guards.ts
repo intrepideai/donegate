@@ -83,9 +83,18 @@ function snippet(text: string): string {
  *  1. a session baseline recorded by `donegate baseline` (hooks do this automatically)
  *  2. HEAD, when there is uncommitted work
  *  3. merge-base with the default branch, when the tree is clean
+ *
+ * An `explicitRef` (the CLI's `--against`) overrides all of that, including
+ * the session baseline: judge mode judges a diff, not a session. The caller
+ * is responsible for validating that the ref exists.
  */
-export async function resolveComparison(config: DoneConfig): Promise<ComparisonContext> {
+export async function resolveComparison(config: DoneConfig, explicitRef?: string): Promise<ComparisonContext> {
   const root = config.root;
+
+  if (explicitRef) {
+    return { kind: 'explicit', ref: explicitRef, baseline: null };
+  }
+
   const inGit = await isGitRepo(root);
   const baseline = loadBaseline(root);
 
@@ -176,9 +185,13 @@ function skippedAll(config: DoneConfig, note: string): GuardResult[] {
     'no_disabled_lint',
     'no_new_todos',
     'no_debug_artifacts',
+    'no_protected_edits',
   ] as const;
   return names
     .filter((n) => config.guards[n] !== false)
+    // An empty guards.protect means the guard is unconfigured, not skipped —
+    // don't add noise to every receipt that never opted in.
+    .filter((n) => n !== 'no_protected_edits' || config.guards.protect.length > 0)
     .map((name) => ({ name, status: 'skipped' as const, findings: [], note }));
 }
 
@@ -222,6 +235,52 @@ export async function runGuards(config: DoneConfig, comparison: ComparisonContex
       });
     }
     results.push(makeResult('no_done_edits', config.guards.no_done_edits, findings));
+  }
+
+  // ── no_protected_edits ─────────────────────────────────────────────────────
+  // DONE.md says `run: npm test`, but what `npm test` *means* lives in files
+  // the agent can edit (package.json, lint/test configs). guards.protect pins
+  // them: changed, deleted, or newly shadowed → finding.
+  if (config.guards.protect.length > 0) {
+    const findings: GuardFinding[] = [];
+    const isProtected = makeTestFileMatcher(config.guards.protect);
+    const blessHint = 'if this change is the human\'s, bless it with `donegate baseline`';
+    if (baseline?.protected_files) {
+      const seen = new Set(Object.keys(baseline.protected_files));
+      for (const [file, entry] of Object.entries(baseline.protected_files)) {
+        try {
+          const current = sha256(fs.readFileSync(path.join(config.root, file)));
+          if (current !== entry.sha) {
+            findings.push({
+              file,
+              detail: `protected file modified since the baseline — it defines what the checks mean (${blessHint})`,
+            });
+          }
+        } catch {
+          findings.push({ file, detail: 'protected file is missing — it existed when the baseline was taken' });
+        }
+      }
+      // A *new* file matching protect globs can shadow an existing config
+      // (e.g. a more-local eslint config) — that's a change in meaning too.
+      for (const file of inputs.added.keys()) {
+        if (isProtected(file) && !seen.has(file)) {
+          findings.push({ file, detail: `new file matches guards.protect (${blessHint})` });
+        }
+      }
+    } else {
+      // No baseline (CI, --against, plain diffs): fall back to the git diff.
+      const flagged = new Set<string>();
+      for (const file of inputs.added.keys()) {
+        if (isProtected(file)) flagged.add(file);
+      }
+      for (const file of [...inputs.modifiedPaths, ...inputs.deletedPaths]) {
+        if (isProtected(file)) flagged.add(file);
+      }
+      for (const file of flagged) {
+        findings.push({ file, detail: 'protected file changed in this diff — it defines what the checks mean' });
+      }
+    }
+    results.push(makeResult('no_protected_edits', config.guards.no_protected_edits, findings));
   }
 
   // ── no_deleted_tests ───────────────────────────────────────────────────────
