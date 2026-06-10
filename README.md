@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/hero.svg" alt="donegate catching a skipped test" width="760">
+<img src="assets/demo.gif" alt="donegate catching an AI agent skip a failing test, then pass once the bug is actually fixed" width="820">
 
 # donegate
 
