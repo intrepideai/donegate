@@ -53,8 +53,9 @@ bounce a teammate; DONE.md just made it visible.
 
 ### Does it work on Windows?
 
-Checks run via `cmd.exe /c` on Windows and the rest is pathname-safe in theory
-— but CI currently covers Linux and macOS only. Windows reports welcome.
+Yes — checks run via the platform shell (`cmd.exe` on Windows), timeouts kill
+the whole process tree (`taskkill /T`), and CI runs the full suite plus the
+dogfooded gate on Linux, macOS, and Windows.
 
 ### Why YAML inside markdown instead of a plain config file?
 
