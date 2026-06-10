@@ -257,12 +257,11 @@ is gated by its own DONE.md, naturally.
 ---
 
 <div align="center">
-<sub>
 
-Built by [**Intrepide**](https://intrepide.ai) — an AI product studio. Every
-agent we ship runs behind guardrails, observability, and audit trails;
-donegate is that rule, open-sourced: **agents don't declare success — evidence
-does.** MIT licensed.
+Built by <a href="https://intrepide.ai"><b>Intrepide</b></a> — an AI product studio.<br>
+Every agent we ship runs behind guardrails, observability, and audit trails.<br>
+<b>donegate is that rule, open-sourced: agents don't declare success — evidence does.</b>
 
-</sub>
+<sub>MIT licensed.</sub>
+
 </div>
