@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- **The donefile can no longer be deleted or broken out of the way.** The stop
+  hook used to treat a missing DONE.md as "not my repo" and an unparseable one
+  as a config typo — both fail-open, both one `rm` or one bad edit away from
+  disarming the gate mid-session. Now, when the session baseline records a
+  donefile that has since vanished or stopped matching, the stop is bounced
+  with restore instructions instead (bounded by the default bounce budget).
+  Repos that never opted in are still silent no-ops, and a donefile that was
+  already broken before the session started still fails open — a config typo
+  must never trap an agent that didn't cause it.
+- `docs/threat-model.md` — an honest map of what the gate catches, what it
+  deliberately doesn't (semantic cheats, command indirection, attacks on
+  donegate's own state), and why CI + branch protection is the actual boundary.
+
 ## 0.1.0
 
 Initial release.

@@ -89,3 +89,26 @@ increments a per-session bounce counter (`.donegate/state.json`, pruned after
 stop through with a loud warning — but it keeps verifying, so the receipt
 always tells the truth. Sessions that recover reset their counter on the first
 green run.
+
+## When the gate itself is the target
+
+A stop hook that can be disarmed by deleting its config file isn't much of a
+gate, so the donefile gets special handling:
+
+- **Deleted mid-session** — repos without a DONE.md are normally silent
+  no-ops, but if `.donegate/baseline.json` records a donefile that has since
+  vanished, the stop is bounced with restore instructions instead. Removing
+  donegate for real is still easy — delete `.donegate/` too — it's just not
+  something an agent can do as a shortcut without it showing.
+- **Broken mid-session** — a donefile that no longer parses *and* no longer
+  matches the baseline hash bounces the stop, with the parse error in the
+  report. One that was already broken when the session started (or has no
+  baseline at all) warns and allows, unchanged: a pre-existing config typo
+  must never trap an agent that didn't cause it.
+
+Both paths use the default bounce budget (3) — the donefile that would
+normally configure `gate.max_bounces` is exactly the thing that's missing or
+unreadable — and both keep every no-trap guarantee: bounded bounces, ctrl-c
+respected, never-opted-in repos untouched. The wider map of what an agent
+could still do, and why CI is the backstop, is in
+[threat-model.md](threat-model.md).

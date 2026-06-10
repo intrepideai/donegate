@@ -40,7 +40,10 @@ const DEFAULT_GUARDS: GuardsConfig = {
   exclude: [],
 };
 
-const DEFAULT_GATE: GateConfig = { max_bounces: 3 };
+/** Bounce budget used when there is no (readable) donefile to say otherwise. */
+export const DEFAULT_MAX_BOUNCES = 3;
+
+const DEFAULT_GATE: GateConfig = { max_bounces: DEFAULT_MAX_BOUNCES };
 
 const CANDIDATES = ['DONE.md', 'done.yml', 'done.yaml', path.join('.donegate', 'done.yml')];
 

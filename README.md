@@ -174,6 +174,13 @@ these patterns (lint configs, pattern scanners) go in `guards.exclude`, and a
 deliberate DONE.md edit is blessed with `donegate baseline`. Renames are
 followed, so moving a test file is never "deleting" it.
 
+Guards are a **ratchet, not a sandbox**: they make the cheap, common shortcuts
+loud and expensive, with receipts. An agent with shell access can still find
+quieter moves — weakening assertions, redefining what `npm test` means in
+package.json, re-blessing the baseline itself. What the gate catches, what it
+deliberately doesn't, and why CI is the copy of the gate an agent can't touch:
+[docs/threat-model.md](docs/threat-model.md).
+
 ## Works with
 
 | | command | mechanism |
@@ -187,9 +194,11 @@ followed, so moving a test file is never "deleting" it.
 Hooks are installed **project-level by default** (commit them — the whole team
 is gated) or `--global` for every repo you touch, and they carry explicit
 generous timeouts so a long test suite is never cut off by an agent's 60-second
-hook default. Repos without a DONE.md are silently ignored, an agent can never
-be trapped (see *bounce protection* in [docs/hooks.md](docs/hooks.md)), and
-ctrl-c always means ctrl-c.
+hook default. Repos without a DONE.md are silently ignored — though deleting
+or breaking DONE.md *mid-session* doesn't make a repo one of those; the
+baseline remembers, and the stop gets bounced. An agent can never be trapped
+(see *bounce protection* in [docs/hooks.md](docs/hooks.md)), and ctrl-c always
+means ctrl-c.
 
 ## Receipts, not vibes
 
@@ -222,8 +231,10 @@ Code 3 is the one to alert a human on.
 
 ## FAQ (the short version)
 
-**Won't the agent just edit DONE.md?** That trips `no_done_edits`. The
-definition of done is not the agent's to edit.
+**Won't the agent just edit DONE.md?** That trips `no_done_edits`. Deleting it
+or breaking its yaml doesn't work either — the session baseline remembers it
+existed, and the stop hook bounces until it's restored. The definition of done
+is not the agent's to edit.
 
 **Won't it delete the failing test?** That trips `no_deleted_tests` — file
 deletions *and* per-file test-count drops.
