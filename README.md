@@ -139,9 +139,12 @@ guards:
   no_done_edits: true      # this file edited mid-session         → fail
   no_new_todos: warn
   no_debug_artifacts: warn
+  protect:                 # files that define what the checks MEAN
+    - package.json         # ("test": "exit 0" is not a fix)
+    - eslint.config.js
 
 gate:
-  max_bounces: 3           # re-prompts per session before giving up
+  max_bounces: 3           # no-progress re-prompts before giving up
 ```
 ````
 
@@ -162,6 +165,7 @@ tries to finish, it diffs reality against that baseline:
 | `no_deleted_tests` | deleted test files, per-file test counts dropping | fail |
 | `no_disabled_lint` | `eslint-disable` `biome-ignore` `@ts-ignore` `# noqa` `# type: ignore` `//nolint` `#[allow(...)]` `@SuppressWarnings` `rubocop:disable` — added anywhere | fail |
 | `no_done_edits` | DONE.md modified or deleted mid-session | fail |
+| `no_protected_edits` | files listed in `guards.protect` (package.json, lint/test configs — the files that define what the checks *mean*) changed, deleted, or shadowed | fail |
 | `no_new_todos` | `TODO` / `FIXME` / `HACK` introduced in code | warn |
 | `no_debug_artifacts` | `console.log` `debugger` `breakpoint()` `pdb.set_trace` `binding.pry` `dbg!` left in non-test code | warn |
 
@@ -176,16 +180,20 @@ followed, so moving a test file is never "deleting" it.
 
 Guards are a **ratchet, not a sandbox**: they make the cheap, common shortcuts
 loud and expensive, with receipts. An agent with shell access can still find
-quieter moves — weakening assertions, redefining what `npm test` means in
-package.json, re-blessing the baseline itself. What the gate catches, what it
-deliberately doesn't, and why CI is the copy of the gate an agent can't touch:
-[docs/threat-model.md](docs/threat-model.md).
+quieter moves — weakening assertions, re-blessing the baseline itself. What
+the gate catches, what it deliberately doesn't, and why CI is the copy of the
+gate an agent can't touch: [docs/threat-model.md](docs/threat-model.md).
+
+Running fan-out workflows with subagents and worktrees? donegate gates those
+boundaries too — a guards-only scan at every `SubagentStop`, and
+`check --against <ref>` as the deterministic judge over any diff:
+[docs/agent-loops.md](docs/agent-loops.md).
 
 ## Works with
 
 | | command | mechanism |
 |---|---|---|
-| **Claude Code** | `donegate install claude` | `Stop` hook — blocks the stop, feeds failures back |
+| **Claude Code** | `donegate install claude` | `Stop` hook — blocks the stop, feeds failures back · `SubagentStop` — guards-only scan per subagent |
 | **Codex CLI** | `donegate install codex` | `Stop` hook (`.codex/hooks.json`) |
 | **Cursor** | `donegate install cursor` | `stop` hook → `followup_message` |
 | **GitHub Actions** | `donegate install ci` | gates PRs, posts the receipt as a comment |
@@ -238,6 +246,11 @@ is not the agent's to edit.
 
 **Won't it delete the failing test?** That trips `no_deleted_tests` — file
 deletions *and* per-file test-count drops.
+
+**Won't it just change what `npm test` means in package.json?** List the
+files your checks depend on in `guards.protect` and that trips
+`no_protected_edits` — they're hashed into the baseline like the donefile
+itself.
 
 **Does this replace CI?** No — it runs *before* the agent declares victory,
 while it still has context to fix things. CI stays as the backstop (and

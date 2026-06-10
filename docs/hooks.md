@@ -1,12 +1,18 @@
 # Agent integrations
 
-`donegate install <target>` wires the gate into an agent's lifecycle. Two hooks
-get installed per agent:
+`donegate install <target>` wires the gate into an agent's lifecycle:
 
 - **session start** → `donegate baseline --if-missing --quiet` — snapshots
-  test files and DONE.md so the tamper guards have something to diff against.
+  test files, protected files, and DONE.md so the tamper guards have something
+  to diff against.
 - **stop** → `donegate hook <agent>` — runs the full gate when the agent tries
   to finish, and blocks the stop (with the failure report) if the verdict is red.
+- **subagent stop** (Claude Code only) → `donegate hook claude --subagent` —
+  a **guards-only** tamper scan at every subagent boundary. No checks run, so
+  it's cheap enough to pay per subagent; a subagent that skipped tests or
+  touched a protected file is bounced while it still has the context to undo
+  it. Subagent bounces use their own ledger so a noisy fan-out can't burn the
+  terminal gate's budget.
 
 Project-level installs are the default and are **shareable** — commit the config
 and every teammate's agent is gated too. Add `--global` to install at the user
@@ -29,6 +35,9 @@ budget — keep their sum under the stop timeout.
     "Stop": [
       { "hooks": [{ "type": "command", "command": "npx -y donegate hook claude" }] }
     ],
+    "SubagentStop": [
+      { "hooks": [{ "type": "command", "command": "npx -y donegate hook claude --subagent" }] }
+    ],
     "SessionStart": [
       { "hooks": [{ "type": "command", "command": "npx -y donegate baseline --if-missing --quiet" }] }
     ]
@@ -37,7 +46,9 @@ budget — keep their sum under the stop timeout.
 ```
 
 On a red verdict the hook prints `{"decision": "block", "reason": "<report>"}`
-— Claude Code keeps the session going and feeds the report to the model.
+— Claude Code keeps the session going and feeds the report to the model. The
+`SubagentStop` entry speaks the same contract but runs guards only (see
+[agent-loops.md](agent-loops.md)).
 
 ## Codex CLI
 
@@ -85,10 +96,16 @@ because tests were deleted" is visible right in the review.
 
 A stop hook that can block forever is a hostage situation, so every block
 increments a per-session bounce counter (`.donegate/state.json`, pruned after
-24h). After `gate.max_bounces` (default 3) the gate stops blocking and lets the
-stop through with a loud warning — but it keeps verifying, so the receipt
-always tells the truth. Sessions that recover reset their counter on the first
-green run.
+24h). After `gate.max_bounces` (default 3) **consecutive attempts without new
+progress** the gate stops blocking and lets the stop through with a loud
+warning — but it keeps verifying, so the receipt always tells the truth.
+
+Progress refreshes the budget: when a stop attempt's failure count (failing
+checks + tripped guards) drops strictly below the session's best so far, the
+counter resets and the agent is told so — a session steadily fixing a long
+list is never cut off mid-fix. "Best ever" is the bar rather than "better
+than last time", so oscillating between failure sets can't farm refreshes and
+total bounces stay bounded. Sessions that go green reset entirely.
 
 ## When the gate itself is the target
 

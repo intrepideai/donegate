@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **`guards.protect` + `no_protected_edits`** — pin the files your checks
+  *mean* (package.json scripts, lint/test/build configs). They're hashed into
+  the baseline like the donefile itself; any change, deletion, or new
+  shadowing file is a finding. Closes the `"test": "exit 0"` hole. Falls back
+  to the git diff when there's no baseline, so it works in CI too.
+- **`SubagentStop` adapter (Claude Code)** — `donegate install claude` now
+  also wires a guards-only tamper scan at every subagent boundary
+  (`donegate hook claude --subagent`). No checks run, so fan-out workflows are
+  gated per node at git-diff cost; subagent bounces use their own ledger.
+- **`donegate check --against <ref>`** — judge mode: evaluate checks + guards
+  against an explicit git ref, ignoring the session baseline. Makes donegate
+  scriptable as the deterministic judge in fan-out workflows (grade each
+  worktree against its fork point) and re-derives verdicts from git history
+  alone. Receipts record the comparison as `explicit`; a nonexistent ref is a
+  config error, not a silent pass.
+- **Progress-aware bounce budget** — `gate.max_bounces` now counts
+  *consecutive bounces without new progress*: a stop attempt with strictly
+  fewer failing checks + tripped guards than the session's best refreshes the
+  budget (and says so). An agent steadily fixing a long list is never cut off
+  mid-fix; "best ever" as the bar keeps total bounces bounded.
+- `docs/agent-loops.md` — where donegate sits in agentic loops and dynamic
+  workflows: terminal gate, per-subagent guard scan, judge mode, worktree
+  behavior.
 - **The donefile can no longer be deleted or broken out of the way.** The stop
   hook used to treat a missing DONE.md as "not my repo" and an unparseable one
   as a config typo — both fail-open, both one `rm` or one bad edit away from

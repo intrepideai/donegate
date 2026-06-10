@@ -227,3 +227,82 @@ test('cursor: aborted turns are not gated even when the donefile is gone', async
     cleanup(root);
   }
 });
+
+// Assembled at runtime so the repo's own no_new_skips guard never sees the
+// literal marker in this (non-excluded) test file.
+const SKIP_CALL = ['test', 'skip'].join('.');
+
+test('subagent boundary: guards-only — failing checks do not block, tampering does', async () => {
+  const root = await setup(FAILING_DONEFILE);
+  try {
+    write(root, 'test/app.test.ts', "import { test } from 'node:test';\ntest('one', () => {});\ntest('two', () => {});\n");
+    gitCommitAll(root);
+    await runBaselineHook({ ifMissing: false, quiet: true, cwd: root });
+
+    // the donefile's check always fails, but the boundary doesn't run checks
+    const clean = await runStopHook('claude', payload(root), { subagent: true });
+    assert.equal(clean.stdout, null);
+    assert.match(clean.stderr ?? '', /subagent boundary clean/);
+
+    // tamper at the boundary → blocked with the guard finding
+    write(root, 'test/app.test.ts', `import { test } from 'node:test';\ntest('one', () => {});\n${SKIP_CALL}('two', () => {});\n`);
+    const tampered = await runStopHook('claude', payload(root), { subagent: true });
+    assert.ok(tampered.stdout, 'expected a block');
+    const response = JSON.parse(tampered.stdout) as { decision: string; reason: string };
+    assert.equal(response.decision, 'block');
+    assert.match(response.reason, /no_new_skips/);
+
+    // subagent bounces live in their own ledger — the terminal gate still starts fresh
+    const main = await runStopHook('claude', payload(root));
+    assert.match(JSON.parse(main.stdout!).reason as string, /attempt 1\/2/);
+  } finally {
+    cleanup(root);
+  }
+});
+
+const PROGRESS_DONEFILE = `# DoD
+\`\`\`yaml
+checks:
+  - name: c1
+    run: node -e "process.exit(require('fs').existsSync('fix1.txt') ? 0 : 1)"
+  - name: c2
+    run: node -e "process.exit(require('fs').existsSync('fix2.txt') ? 0 : 1)"
+gate:
+  max_bounces: 2
+\`\`\`
+`;
+
+test('progress refreshes the bounce budget; stalling exhausts it', async () => {
+  const root = await setup(PROGRESS_DONEFILE);
+  try {
+    const block = async () => {
+      const outcome = await runStopHook('claude', payload(root));
+      assert.ok(outcome.stdout, 'expected a block');
+      return JSON.parse(outcome.stdout) as { decision: string; reason: string };
+    };
+
+    // two failing checks, no movement: the budget counts down
+    assert.match((await block()).reason, /attempt 1\/2/);
+    assert.match((await block()).reason, /attempt 2\/2/);
+
+    // fixing one check is progress → budget refreshed, loudly
+    write(root, 'fix1.txt', 'fixed\n');
+    const refreshed = await block();
+    assert.match(refreshed.reason, /attempt 1\/2/);
+    assert.match(refreshed.reason, /bounce budget was refreshed/);
+
+    // stalling at the new best exhausts the refreshed budget
+    assert.match((await block()).reason, /attempt 2\/2/);
+    const spent = await runStopHook('claude', payload(root));
+    assert.equal(spent.stdout, null);
+    assert.match(spent.stderr ?? '', /giving up/);
+
+    // finishing the job still works and clears the session
+    write(root, 'fix2.txt', 'fixed\n');
+    const done = await runStopHook('claude', payload(root));
+    assert.equal(done.stdout, null);
+    assert.match(done.stderr ?? '', /✓ DONE/);
+  } finally {
+    cleanup(root);
+  }
+});

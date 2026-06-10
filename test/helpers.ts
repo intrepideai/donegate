@@ -35,6 +35,10 @@ export function gitCommitAll(root: string, message = 'commit'): void {
   execFileSync('git', ['commit', '-q', '-m', message], { cwd: root, stdio: 'pipe' });
 }
 
+export function gitHead(root: string): string {
+  return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, stdio: 'pipe' }).toString().trim();
+}
+
 export const BASIC_DONEFILE = `# Definition of Done
 
 \`\`\`yaml

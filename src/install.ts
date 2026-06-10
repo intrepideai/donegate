@@ -4,8 +4,17 @@ import path from 'node:path';
 
 export type InstallTarget = 'claude' | 'codex' | 'cursor' | 'ci';
 
-export const HOOK_COMMANDS: Record<Exclude<InstallTarget, 'ci'>, { stop: string; baseline: string }> = {
-  claude: { stop: 'npx -y donegate hook claude', baseline: 'npx -y donegate baseline --if-missing --quiet' },
+export const HOOK_COMMANDS: Record<
+  Exclude<InstallTarget, 'ci'>,
+  { stop: string; baseline: string; subagentStop?: string }
+> = {
+  claude: {
+    stop: 'npx -y donegate hook claude',
+    baseline: 'npx -y donegate baseline --if-missing --quiet',
+    // Guards-only tamper scan at every subagent boundary — fast (git diffs,
+    // no checks), so fan-out workflows are gated per node, not just at the end.
+    subagentStop: 'npx -y donegate hook claude --subagent',
+  },
   codex: { stop: 'npx -y donegate hook codex', baseline: 'npx -y donegate baseline --if-missing --quiet' },
   cursor: { stop: 'npx -y donegate hook cursor', baseline: 'npx -y donegate baseline --if-missing --quiet' },
 };
@@ -17,6 +26,8 @@ export const HOOK_COMMANDS: Record<Exclude<InstallTarget, 'ci'>, { stop: string;
  */
 const STOP_TIMEOUT_SECONDS = 1800;
 const BASELINE_TIMEOUT_SECONDS = 120;
+/** Guards only — no checks run — but big-repo git diffs and a cold npx need headroom. */
+const SUBAGENT_TIMEOUT_SECONDS = 300;
 
 export interface InstallResult {
   target: InstallTarget;
@@ -140,6 +151,9 @@ export function installAgent(
   } else {
     changed = mergeNestedHooks(config, 'Stop', commands.stop, STOP_TIMEOUT_SECONDS) || changed;
     changed = mergeNestedHooks(config, 'SessionStart', commands.baseline, BASELINE_TIMEOUT_SECONDS) || changed;
+    if (commands.subagentStop) {
+      changed = mergeNestedHooks(config, 'SubagentStop', commands.subagentStop, SUBAGENT_TIMEOUT_SECONDS) || changed;
+    }
   }
 
   if (!changed) return { target, file, action: 'already-installed' };
@@ -170,7 +184,7 @@ export function uninstallAgent(
       }
     }
   } else {
-    for (const event of ['Stop', 'SessionStart']) {
+    for (const event of ['Stop', 'SessionStart', 'SubagentStop']) {
       if (removeNestedHooks(config, event)) changed = true;
     }
   }

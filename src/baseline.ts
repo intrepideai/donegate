@@ -203,6 +203,24 @@ export async function createBaseline(config: DoneConfig): Promise<Baseline> {
     donefile_path: path.relative(config.root, config.sourcePath).split(path.sep).join('/'),
     test_files: entries,
   };
+
+  // Pin the files the verdict depends on but the gate doesn't run — the ones
+  // that define what the check commands *mean* (package.json scripts,
+  // lint/test configs). No size cap: a lockfile is large and is exactly the
+  // kind of file worth pinning.
+  if (config.guards.protect.length > 0) {
+    const protectedEntries: Record<string, { sha: string }> = {};
+    for (const rel of walk(config.root, makeTestFileMatcher(config.guards.protect))) {
+      try {
+        const key = rel.split(path.sep).join('/');
+        protectedEntries[key] = { sha: sha256(fs.readFileSync(path.join(config.root, rel))) };
+      } catch {
+        // unreadable — skip
+      }
+    }
+    baseline.protected_files = protectedEntries;
+  }
+
   return baseline;
 }
 
