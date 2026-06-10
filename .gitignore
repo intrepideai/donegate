@@ -3,3 +3,4 @@ dist/
 .donegate/
 *.tgz
 .DS_Store
+.npmrc
