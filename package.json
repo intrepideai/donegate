@@ -1,0 +1,61 @@
+{
+  "name": "donegate",
+  "version": "0.1.0",
+  "description": "Your agent says it's done. DONE.md decides. A deterministic definition-of-done gate for Claude Code, Codex, Cursor & CI — with tamper guards and receipts.",
+  "keywords": [
+    "ai",
+    "agents",
+    "claude-code",
+    "codex",
+    "cursor",
+    "coding-agent",
+    "definition-of-done",
+    "quality-gate",
+    "stop-hook",
+    "verification",
+    "done-md",
+    "ci"
+  ],
+  "homepage": "https://github.com/intrepideai/donegate#readme",
+  "bugs": {
+    "url": "https://github.com/intrepideai/donegate/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/intrepideai/donegate.git"
+  },
+  "license": "MIT",
+  "author": "Intrepide (https://intrepide.ai)",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "donegate": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "pretest": "npm run build",
+    "test": "node --import tsx --test test/*.test.ts",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="340" viewBox="0 0 760 340" role="img" aria-label="donegate terminal demo">
+  <defs>
+    <clipPath id="window"><rect x="20" y="16" width="720" height="308" rx="12"/></clipPath>
+  </defs>
+
+  <!-- window -->
+  <rect x="20" y="16" width="720" height="308" rx="12" fill="#0d1117" stroke="#30363d" stroke-width="1.5"/>
+
+  <g clip-path="url(#window)">
+    <!-- title bar -->
+    <rect x="20" y="16" width="720" height="40" fill="#161b22"/>
+    <circle cx="48" cy="36" r="6.5" fill="#ff5f57"/>
+    <circle cx="70" cy="36" r="6.5" fill="#febc2e"/>
+    <circle cx="92" cy="36" r="6.5" fill="#28c840"/>
+    <text x="380" y="41" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" fill="#8b949e" text-anchor="middle">your repo — the moment the agent says it's finished</text>
+  </g>
+
+  <g font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14.5">
+    <!-- agent claim -->
+    <text x="48" y="88" fill="#8b949e">◆ agent:</text>
+    <text x="130" y="88" fill="#e6edf3">“All done! Tests passing ✅”</text>
+
+    <!-- gate runs -->
+    <text x="48" y="122" fill="#8b949e">$</text>
+    <text x="66" y="122" fill="#e6edf3">donegate check</text>
+
+    <text x="48" y="152" fill="#3fb950">✓ lint</text>
+    <text x="130" y="152" fill="#484f58">(0.1s)</text>
+    <text x="48" y="178" fill="#3fb950">✓ tests</text>
+    <text x="130" y="178" fill="#484f58">(1.4s)</text>
+
+    <text x="48" y="210" fill="#e6edf3" font-weight="bold">guards</text>
+    <text x="48" y="236" fill="#f85149">✗ no_new_skips</text>
+    <text x="210" y="236" fill="#8b949e">test/discount.test.js:9 — test marked as skipped</text>
+    <text x="66" y="258" fill="#484f58">test.skip('rejects discounts over 100%', () =&gt; {</text>
+
+    <!-- verdict -->
+    <text x="48" y="296" fill="#f85149" font-weight="bold">✗ NOT DONE</text>
+    <text x="178" y="296" fill="#8b949e">— tests are green because a test got skipped. Nice try.</text>
+  </g>
+</svg>

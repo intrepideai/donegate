@@ -1,0 +1,29 @@
+# Publishes to npm with provenance when a v* tag is pushed.
+# Requires the NPM_TOKEN repository secret (automation token).
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: npm test
+      - run: node dist/cli.js check
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
